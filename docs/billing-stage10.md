@@ -6,10 +6,20 @@ block uncancel, but never cancellation. The server chooses the owned active
 subscription; requests carry no IDs or timing. Management ignores checkout flags.
 
 Claims serialize opposing operations. Definite refusals release them; confirmed
-and ambiguous writes stay pending until the first canonical reconciliation read
-that started strictly after the claim. Claims have no timer expiry. Polling checks
+and ambiguous writes stay pending through a persisted 60-second dispatch window
+(`controlWriteUntil`, matching both routes' maxDuration). Canonical reconciliation
+clears only on a read started strictly after both this deadline and any recorded
+result time (`controlResultAt`). Before-result reads cannot release the write lock.
+The trusted deadline is returned by prepareControl and passed only in server config;
+the adapter refuses at entry and immediately before PATCH if expired and aborts at
+the smaller of its 15-second timeout or remaining window. Missing deadline preserves
+the deletion executor's separate adapter contract. Old claims without the optional
+window use claim time + 60 seconds. Claims have no unconditional timer release. Polling checks
 pending controls in every local status, with an indexed bounded read and active
-cadence. A route crash after claiming is covered by the same poll wakeup.
+cadence. Pending findings emit claim/read-specific receipt IDs, including repeated
+active provider status, so every fresh recovery read can reach reconciliation.
+Reread IDs are deduplicated before applying the resource limit. A route crash after
+claiming or lost result is covered by the same post-window poll wakeup.
 
 Only canonical reconciliation writes cancelAt (settled paidThrough when scheduled,
 absent otherwise). Controls never change settled periods, lots, credits or recovery
@@ -43,10 +53,19 @@ Injected fetch, bounded response reads, manual redirects and a total 15-second
 abort budget; no automatic write retry or provider URL/body/error logging. Unknown
 writes remain unknown. SDK types do not establish scoped-key PATCH permissions,
 production behavior, redirect handling or cancellation timing in a real account;
-those remain stage-13 gates. No provider call was made to develop this change.
+those remain stage-13 gates. A client abort/deadline prevents late dispatch but
+cannot prove that an already accepted provider write will not execute later. The
+window is an approved operational bound, not provider transaction fencing; late
+completion behavior needs stage-13 verification and support handling. No provider call was made to develop this change.
 
 ## Verification
 
 CI on the exact pushed head is the gate. Local typecheck, lint, tests, build,
 install, servers and deployment were prohibited. Added mocked adapter/routes,
 pure rule and convex-test cases cover claims, ownership and settled-money safety.
+
+Authorization follows the existing feature-local billingCheckout convention:
+validateInternalKey first, then verifyAuth and both ownerTokenIdentifier/subject
+checks against the resource's customer. The small domain helper is intentionally
+local; broad admin/auth consolidation would change unrelated trust boundaries.
+Same-origin and JSON guards are the identical established shared request helpers.

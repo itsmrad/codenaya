@@ -66,3 +66,36 @@ describe("cancellation adapter", () => {
     expect(fn.mock.calls.every(([url]) => String(url).startsWith("https://live.dodopayments.com/"))).toBe(true);
   });
 });
+
+it("an expired trusted write window refuses before entry or late PATCH dispatch", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(1000);
+    const fn = vi.fn<typeof fetch>();
+    expect(await setDodoCancellation({ ...config, controlWriteUntil: 1000 }, { subscriptionId: "sub_dummy", timing: "period_end" }, fn))
+      .toEqual({ kind: "refused" });
+    expect(fn).not.toHaveBeenCalled();
+    fn.mockResolvedValueOnce(ok(customer)).mockImplementationOnce(async () => {
+      vi.setSystemTime(2000);
+      return ok(subscription);
+    });
+    expect(await setDodoCancellation({ ...config, controlWriteUntil: 2000 }, { subscriptionId: "sub_dummy", timing: "period_end" }, fn))
+      .toEqual({ kind: "refused" });
+    expect(fn.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
+  } finally { vi.useRealTimers(); }
+});
+
+it("an in-flight PATCH aborts at the remaining write window, never retries", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(1000);
+    const fn = vi.fn<typeof fetch>().mockResolvedValueOnce(ok(customer)).mockResolvedValueOnce(ok(subscription))
+      .mockImplementationOnce(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+        init!.signal!.addEventListener("abort", () => reject(new DOMException("dummy", "AbortError")));
+      }));
+    const result = setDodoCancellation({ ...config, controlWriteUntil: 2000 }, { subscriptionId: "sub_dummy", timing: "period_end" }, fn);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await result).toEqual({ kind: "unknown" });
+    expect(fn).toHaveBeenCalledTimes(3);
+  } finally { vi.useRealTimers(); }
+});

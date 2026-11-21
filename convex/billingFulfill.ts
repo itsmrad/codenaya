@@ -1,3 +1,4 @@
+import { CONTROL_WRITE_WINDOW_MS } from "../src/features/billing/subscription-controls";
 import { v, type Infer } from "convex/values";
 
 import { currentUsage } from "../src/features/billing/credits";
@@ -386,8 +387,9 @@ async function applySubscription(ctx: Ctx, customer: Customer, { fact, outcome }
   await ctx.db.patch("billingSubscriptions", row._id, {
     observedAt: now, ...(ended ? { status: ended } : {}),
     controlRenewable: fact.status === "active",
-    ...(row.controlPendingAt !== undefined && (fact.readStartedAt ?? -Infinity) > row.controlPendingAt
-      ? { controlOperation: undefined, controlPendingAt: undefined } : {}),
+    ...(row.controlPendingAt !== undefined && (fact.readStartedAt ?? -Infinity) > Math.max(
+      row.controlWriteUntil ?? row.controlPendingAt + CONTROL_WRITE_WINDOW_MS, row.controlResultAt ?? 0)
+      ? { controlOperation: undefined, controlPendingAt: undefined, controlWriteUntil: undefined, controlResultAt: undefined } : {}),
     cancelAt: fact.cancelAtNextBillingDate ? row.paidThrough : undefined,
   });
 }
