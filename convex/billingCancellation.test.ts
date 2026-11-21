@@ -256,7 +256,7 @@ test("temporary receipt blocker retries with backoff and exhausts to support", a
   }
 });
 
-test.each(["marker", "renewable", "control", "processing", "open", "unknown"])("final proof refuses leftover %s outside the current cursor", async blocker => {
+test.each(["marker", "renewable", "control", "processing", "open", "unknown"])("leftover %s stays incomplete; unknown creates require support", async blocker => {
   const t = setup(), ref = await customer(t); provider();
   if (blocker === "processing" || blocker === "open" || blocker === "unknown") await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "hidden",
     state: blocker, terms }));
@@ -265,7 +265,7 @@ test.each(["marker", "renewable", "control", "processing", "open", "unknown"])("
     ...(blocker === "control" ? { controlPendingAt: NOW, controlOperation: "cancel" as const } : {}) }));
   await phase(t, ref, "purchases");
   await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
-  expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: "retry" });
+  expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: blocker === "unknown" ? "support" : "retry" });
 });
 
 test("ended subscription status is persisted atomically with marker clearance, retaining paid periods", async () => {
