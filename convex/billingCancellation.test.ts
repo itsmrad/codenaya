@@ -293,3 +293,14 @@ test("expired open checkout becomes terminal before its marker clears without to
     await t.mutation(internal.billingDeletion.markDeletionBatch, { customerRef: ref, table, cursor: null });
   expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "complete", cancellationRecoveryRequired: false });
 });
+
+
+test("quarantined purchase retains its marker and requires support even with an expired unpaid session", async () => {
+  const t = setup(), ref = await customer(t); provider();
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "quarantined_create",
+    state: "quarantined", sessionId: "cks_dummy", cancellationRecoveryRequired: true, terms }));
+  await phase(t, ref, "purchases");
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "quarantined", cancellationRecoveryRequired: true });
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "support", cancellationRecoveryRequired: true });
+});

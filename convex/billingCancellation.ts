@@ -206,7 +206,7 @@ export const recoverCustomer = internalAction({
                   DEAD_PAYMENT.has(payment.status) && (!resource.sessionId || safe));
               await finding("payment", resource.paymentId, payment.status);
             }
-            if (["unknown", "preparing", "quarantined"].includes(resource.state ?? "") && !resource.sessionId && !resource.paymentId) evidence.support = true;
+            if (resource.state === "quarantined" || ["unknown", "preparing"].includes(resource.state ?? "") && !resource.sessionId && !resource.paymentId) evidence.support = true;
             if (["unknown", "preparing", "processing", "quarantined"].includes(resource.state ?? "")) safe = false;
             if (!safe) progress.blocked = true;
             else evidence.resolved.push(resource.purchaseRef);
