@@ -26,7 +26,7 @@ export async function ownerDeleted(ctx: QueryCtx, customer: Pick<Doc<"billingCus
   return !user || user.deletedAt !== undefined || customer.deletedAt !== undefined;
 }
 
-async function requireActiveOwner(ctx: QueryCtx, customer: Pick<Doc<"billingCustomers">, "userId" | "deletedAt" | "hold">) {
+export async function requireActiveOwner(ctx: QueryCtx, customer: Pick<Doc<"billingCustomers">, "userId" | "deletedAt" | "hold">) {
   if (customer.hold || await ownerDeleted(ctx, customer)) throw appError("FORBIDDEN", "Billing owner is unavailable");
 }
 
@@ -34,77 +34,92 @@ const requireMode = (actual: Doc<"billingCustomers">["mode"], expected: Doc<"bil
   if (actual !== expected) throw conflict();
 };
 
+const ensureCustomerArgs = v.object({ mode: billingModeValidator, ...identityFields });
+
+/** Shared by `ensureCustomer` and checkout: the owner's one customer row in `mode`, created `preparing`. */
+export async function ensureCustomerRow(ctx: MutationCtx, args: Infer<typeof ensureCustomerArgs>) {
+  requireText(args.ownerTokenIdentifier);
+  requireText(args.userId);
+  if (!args.ownerTokenIdentifier.endsWith(`|${args.userId}`)) {
+    throw appError("INVALID_ARGUMENT", "Billing owner token does not match its subject");
+  }
+  await requireActiveOwner(ctx, args);
+  const existing = await ctx.db.query("billingCustomers")
+    .withIndex("by_mode_and_ownerTokenIdentifier", q => q.eq("mode", args.mode).eq("ownerTokenIdentifier", args.ownerTokenIdentifier)).unique();
+  const bySubject = await ctx.db.query("billingCustomers")
+    .withIndex("by_mode_and_userId", q => q.eq("mode", args.mode).eq("userId", args.userId)).unique();
+  if (existing) {
+    if (existing.userId !== args.userId || bySubject?._id !== existing._id) throw conflict();
+    await requireActiveOwner(ctx, existing);
+    return existing._id;
+  }
+  if (bySubject) throw conflict();
+  return await ctx.db.insert("billingCustomers", {
+    ...args, creationState: "preparing", generation: 0, inputRevision: 0, unresolvedReceipts: 0,
+  });
+}
+
 // Only trusted internal callers pass normalized, verified Clerk tokenIdentifier + subject.
 export const ensureCustomer = internalMutation({
-  args: { mode: billingModeValidator, ...identityFields },
+  args: ensureCustomerArgs,
   returns: v.id("billingCustomers"),
-  handler: async (ctx, args) => {
-    requireText(args.ownerTokenIdentifier);
-    requireText(args.userId);
-    if (!args.ownerTokenIdentifier.endsWith(`|${args.userId}`)) {
-      throw appError("INVALID_ARGUMENT", "Billing owner token does not match its subject");
-    }
-    await requireActiveOwner(ctx, args);
-    const existing = await ctx.db.query("billingCustomers")
-      .withIndex("by_mode_and_ownerTokenIdentifier", q => q.eq("mode", args.mode).eq("ownerTokenIdentifier", args.ownerTokenIdentifier)).unique();
-    const bySubject = await ctx.db.query("billingCustomers")
-      .withIndex("by_mode_and_userId", q => q.eq("mode", args.mode).eq("userId", args.userId)).unique();
-    if (existing) {
-      if (existing.userId !== args.userId || bySubject?._id !== existing._id) throw conflict();
-      await requireActiveOwner(ctx, existing);
-      return existing._id;
-    }
-    if (bySubject) throw conflict();
-    return await ctx.db.insert("billingCustomers", {
-      ...args, creationState: "preparing", generation: 0, inputRevision: 0, unresolvedReceipts: 0,
-    });
-  },
+  handler: ensureCustomerRow,
 });
+
+const bindCustomerArgs = v.object({ customerRef: v.id("billingCustomers"), customerId: v.string() });
+
+/** Shared by `bindCustomer` and checkout; throws CONFLICT when the ID belongs to another customer row. */
+export async function bindCustomerRow(ctx: MutationCtx, { customerRef, customerId }: Infer<typeof bindCustomerArgs>) {
+  requireText(customerId);
+  const customer = await requireCustomer(ctx, customerRef);
+  const existing = await ctx.db.query("billingCustomers")
+    .withIndex("by_mode_and_customerId", q => q.eq("mode", customer.mode).eq("customerId", customerId)).unique();
+  if ((existing && existing._id !== customerRef) || (customer.customerId && customer.customerId !== customerId)) throw conflict();
+  // A late ID for a deleted or held owner is kept for recovery but never reopens the customer.
+  const live = !customer.hold && !(await ownerDeleted(ctx, customer));
+  await ctx.db.patch("billingCustomers", customerRef, live ? { customerId, creationState: "ready" } : { customerId });
+  // Also for a deleted or held owner: its early receipts still need processing for suppression and recovery.
+  await associateUnmappedReceipts(ctx, customer, { providerCustomerId: customerId });
+  return null;
+}
 
 export const bindCustomer = internalMutation({
-  args: { customerRef: v.id("billingCustomers"), customerId: v.string() },
+  args: bindCustomerArgs,
   returns: v.null(),
-  handler: async (ctx, { customerRef, customerId }) => {
-    requireText(customerId);
-    const customer = await requireCustomer(ctx, customerRef);
-    const existing = await ctx.db.query("billingCustomers")
-      .withIndex("by_mode_and_customerId", q => q.eq("mode", customer.mode).eq("customerId", customerId)).unique();
-    if ((existing && existing._id !== customerRef) || (customer.customerId && customer.customerId !== customerId)) throw conflict();
-    // A late ID for a deleted or held owner is kept for recovery but never reopens the customer.
-    const live = !customer.hold && !(await ownerDeleted(ctx, customer));
-    await ctx.db.patch("billingCustomers", customerRef, live ? { customerId, creationState: "ready" } : { customerId });
-    // Also for a deleted or held owner: its early receipts still need processing for suppression and recovery.
-    await associateUnmappedReceipts(ctx, customer, { providerCustomerId: customerId });
-    return null;
-  },
+  handler: bindCustomerRow,
 });
 
+const reservePurchaseArgs = v.object({ customerRef: v.id("billingCustomers"), intentId: v.string(), terms: billingPurchaseTermsValidator });
+
+/** Shared by `reservePurchase` and checkout; refuses (CONFLICT) while the one-checkout lock is held. */
+export async function reservePurchaseRow(ctx: MutationCtx, args: Infer<typeof reservePurchaseArgs>) {
+  requireText(args.intentId);
+  requireText(args.terms.productId);
+  requireText(args.terms.catalogVersion);
+  if (![args.terms.quantity, args.terms.credits].every(n => Number.isSafeInteger(n) && n > 0)) {
+    throw appError("INVALID_ARGUMENT", "Purchase quantity and credits must be positive integers");
+  }
+  const customer = await requireCustomer(ctx, args.customerRef);
+  await requireActiveOwner(ctx, customer);
+  if (customer.creationState !== "ready" || !customer.customerId) throw conflict();
+  const existing = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_intentId", q => q.eq("mode", customer.mode).eq("intentId", args.intentId)).unique();
+  if (existing) {
+    if (existing.customerRef !== args.customerRef || Object.entries(args.terms)
+      .some(([key, value]) => existing.terms[key as keyof typeof args.terms] !== value)) throw conflict();
+    return existing._id;
+  }
+  // Unknown outcomes keep this lock; time alone never authorizes a second checkout.
+  if (customer.pendingPurchaseRef) throw conflict();
+  const purchaseRef = await ctx.db.insert("billingPurchases", { ...args, mode: customer.mode, state: "preparing" });
+  await ctx.db.patch("billingCustomers", customer._id, { pendingPurchaseRef: purchaseRef });
+  return purchaseRef;
+}
+
 export const reservePurchase = internalMutation({
-  args: { customerRef: v.id("billingCustomers"), intentId: v.string(), terms: billingPurchaseTermsValidator },
+  args: reservePurchaseArgs,
   returns: v.id("billingPurchases"),
-  handler: async (ctx, args) => {
-    requireText(args.intentId);
-    requireText(args.terms.productId);
-    requireText(args.terms.catalogVersion);
-    if (![args.terms.quantity, args.terms.credits].every(n => Number.isSafeInteger(n) && n > 0)) {
-      throw appError("INVALID_ARGUMENT", "Purchase quantity and credits must be positive integers");
-    }
-    const customer = await requireCustomer(ctx, args.customerRef);
-    await requireActiveOwner(ctx, customer);
-    if (customer.creationState !== "ready" || !customer.customerId) throw conflict();
-    const existing = await ctx.db.query("billingPurchases")
-      .withIndex("by_mode_and_intentId", q => q.eq("mode", customer.mode).eq("intentId", args.intentId)).unique();
-    if (existing) {
-      if (existing.customerRef !== args.customerRef || Object.entries(args.terms)
-        .some(([key, value]) => existing.terms[key as keyof typeof args.terms] !== value)) throw conflict();
-      return existing._id;
-    }
-    // Unknown outcomes keep this lock; time alone never authorizes a second checkout.
-    if (customer.pendingPurchaseRef) throw conflict();
-    const purchaseRef = await ctx.db.insert("billingPurchases", { ...args, mode: customer.mode, state: "preparing" });
-    await ctx.db.patch("billingCustomers", customer._id, { pendingPurchaseRef: purchaseRef });
-    return purchaseRef;
-  },
+  handler: reservePurchaseRow,
 });
 
 const bindSubscriptionArgs = v.object({ customerRef: v.id("billingCustomers"), mode: billingModeValidator, subscriptionId: v.string(), productId: v.string() });
@@ -132,40 +147,47 @@ export const bindSubscription = internalMutation({
   handler: bindSubscriptionRow,
 });
 
+const bindPurchaseArgs = v.object({
+  purchaseRef: v.id("billingPurchases"), mode: billingModeValidator, ...billingResourceIdsValidator.fields, expiresAt: v.optional(v.number()),
+});
+
+/** Shared by `bindPurchase` and checkout; each provider ID is unique per mode and never changes once set. */
+export async function bindPurchaseRow(ctx: MutationCtx, { purchaseRef, mode, ...ids }: Infer<typeof bindPurchaseArgs>) {
+  const purchase = await ctx.db.get("billingPurchases", purchaseRef);
+  if (!purchase) throw appError("NOT_FOUND", "Billing purchase not found");
+  requireMode(purchase.mode, mode);
+  const customer = await requireCustomer(ctx, purchase.customerRef);
+  for (const field of ["sessionId", "paymentId", "subscriptionId", "expiresAt"] as const) {
+    const value = ids[field];
+    if (value === undefined) continue;
+    if (typeof value === "string") requireText(value);
+    else if (!Number.isFinite(value)) throw appError("INVALID_ARGUMENT", "Invalid checkout expiry");
+    if (purchase[field] !== undefined && purchase[field] !== value) throw conflict();
+  }
+  for (const field of ["sessionId", "paymentId"] as const) {
+    const value = ids[field];
+    if (value === undefined) continue;
+    const existing = await ctx.db.query("billingPurchases")
+      .withIndex(field === "sessionId" ? "by_mode_and_sessionId" : "by_mode_and_paymentId", q => q.eq("mode", purchase.mode).eq(field, value)).unique();
+    if (existing && existing._id !== purchaseRef) throw conflict();
+  }
+  if (ids.subscriptionId !== undefined) {
+    const subscription = await ctx.db.query("billingSubscriptions")
+      .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", purchase.mode).eq("subscriptionId", ids.subscriptionId!)).unique();
+    if (!subscription || subscription.customerRef !== customer._id || subscription.productId !== purchase.terms.productId) throw conflict();
+  }
+  await ctx.db.patch("billingPurchases", purchaseRef, {
+    ...ids,
+    ...(await ownerDeleted(ctx, customer) ? { cancellationRecoveryRequired: true } : {}),
+  });
+  if (ids.paymentId !== undefined) await associateUnmappedReceipts(ctx, customer, { paymentId: ids.paymentId });
+  return null;
+}
+
 export const bindPurchase = internalMutation({
-  args: { purchaseRef: v.id("billingPurchases"), mode: billingModeValidator, ...billingResourceIdsValidator.fields, expiresAt: v.optional(v.number()) },
+  args: bindPurchaseArgs,
   returns: v.null(),
-  handler: async (ctx, { purchaseRef, mode, ...ids }) => {
-    const purchase = await ctx.db.get("billingPurchases", purchaseRef);
-    if (!purchase) throw appError("NOT_FOUND", "Billing purchase not found");
-    requireMode(purchase.mode, mode);
-    const customer = await requireCustomer(ctx, purchase.customerRef);
-    for (const field of ["sessionId", "paymentId", "subscriptionId", "expiresAt"] as const) {
-      const value = ids[field];
-      if (value === undefined) continue;
-      if (typeof value === "string") requireText(value);
-      else if (!Number.isFinite(value)) throw appError("INVALID_ARGUMENT", "Invalid checkout expiry");
-      if (purchase[field] !== undefined && purchase[field] !== value) throw conflict();
-    }
-    for (const field of ["sessionId", "paymentId"] as const) {
-      const value = ids[field];
-      if (value === undefined) continue;
-      const existing = await ctx.db.query("billingPurchases")
-        .withIndex(field === "sessionId" ? "by_mode_and_sessionId" : "by_mode_and_paymentId", q => q.eq("mode", purchase.mode).eq(field, value)).unique();
-      if (existing && existing._id !== purchaseRef) throw conflict();
-    }
-    if (ids.subscriptionId !== undefined) {
-      const subscription = await ctx.db.query("billingSubscriptions")
-        .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", purchase.mode).eq("subscriptionId", ids.subscriptionId!)).unique();
-      if (!subscription || subscription.customerRef !== customer._id || subscription.productId !== purchase.terms.productId) throw conflict();
-    }
-    await ctx.db.patch("billingPurchases", purchaseRef, {
-      ...ids,
-      ...(await ownerDeleted(ctx, customer) ? { cancellationRecoveryRequired: true } : {}),
-    });
-    if (ids.paymentId !== undefined) await associateUnmappedReceipts(ctx, customer, { paymentId: ids.paymentId });
-    return null;
-  },
+  handler: bindPurchaseRow,
 });
 
 /**

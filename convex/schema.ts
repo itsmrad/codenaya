@@ -358,6 +358,9 @@ export default defineSchema({
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
+    // Bumped by every env change and project delete; a secret runtime is
+    // admitted only at the current value (convex/runtimeHandles.ts). Absent = 0.
+    envGeneration: v.optional(v.number()),
     // Website-only share link: 128 random bits, hex; legacy /s URLs redirect.
     shareToken: v.optional(v.string()),
     shareEnabled: v.optional(v.boolean()),
@@ -829,6 +832,8 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     creationState: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("ready")),
     creationLeaseId: v.optional(v.string()),
+    // When checkout took `creationLeaseId`; a lease older than CUSTOMER_LEASE_STALE_MS may have created a customer.
+    creationLeasedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
     hold: v.optional(v.boolean()),
     activeSubscriptionRef: v.optional(v.id("billingSubscriptions")),
@@ -868,6 +873,8 @@ export default defineSchema({
     terms: billingPurchaseTermsValidator,
     ...billingResourceIdsValidator.fields,
     expiresAt: v.optional(v.number()),
+    // Host-checked hosted checkout URL from our own create response; returned only to its owner, never logged.
+    checkoutUrl: v.optional(v.string()),
     state: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("open"), v.literal("processing"), v.literal("settled"), v.literal("terminal"), v.literal("quarantined")),
     cancellationRecoveryRequired: v.optional(v.boolean()),
     principalMinor: v.optional(v.number()),
@@ -1105,6 +1112,19 @@ export default defineSchema({
   })
     .index("by_project", ["projectId"])
     .index("by_project_and_key", ["projectId", "key"]),
+
+  /**
+   * One per secret-bearing preview boot: registered before any value is
+   * injected, admitted only while the project's envGeneration still matches,
+   * and marked stale by the env change that outdates it (convex/runtimeHandles.ts).
+   */
+  runtimeHandles: defineTable({
+    projectId: v.id("projects"),
+    // Public sandbox id (`provider:id`), so a sweep can kill it through the seam.
+    sandboxId: v.string(),
+    generation: v.number(),
+    state: v.union(v.literal("pending"), v.literal("running"), v.literal("stale")),
+  }).index("by_projectId_and_state", ["projectId", "state"]),
 
   /**
    * Values redacted from MCP tool results, held so the agent can store one as an
