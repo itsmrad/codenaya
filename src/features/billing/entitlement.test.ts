@@ -106,6 +106,14 @@ describe("accountAvailability", () => {
     });
   });
 
+  it("an early-settled next period's lot is not spendable or shown until it starts", () => {
+    const next = period(LIVE.expiresAt, LIVE.expiresAt + 30 * DAY);
+    const lots = [lot("current_period", 300, { expiresAt: LIVE.expiresAt, serviceStart: LIVE.serviceStart }), next];
+    const view = (at: number) => accountAvailability(input({ periodLots: [LIVE, next], activeLots: lots }), at);
+    expect(view(NOW)).toMatchObject({ plan: "pro", creditsLeft: 300, paidCreditsRemaining: 300, nextChangeAt: LIVE.expiresAt });
+    expect(view(LIVE.expiresAt)).toMatchObject({ plan: "pro", creditsLeft: 2000, paidCreditsRemaining: 2000 });
+  });
+
   it("a cancelled period returns to the same month's Free usage, not legacy Pro usage", () => {
     // Enablement stamped November at 120 used; the Pro period later ran up 1,000 on the legacy counters.
     const ended = period(NOW - 20 * DAY, NOW - DAY);

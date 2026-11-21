@@ -65,6 +65,20 @@ describe("allocateCredits", () => {
     expect(lotRemaining(lots[0], NOW - 1)).toBe(10);
   });
 
+  it("never spends a next period's lot before its serviceStart, and spends it first once it starts", () => {
+    const lots = [
+      lot("next", "current_period", 50, { serviceStart: NOW + 100, expiresAt: NOW + 400 }),
+      lot("t", "top_up", 5, { expiresAt: NOW + 500 }),
+      lot("roll", "rollover", 5, { expiresAt: NOW + 400 }),
+      lot("cur", "current_period", 5, { serviceStart: NOW - 100, expiresAt: NOW + 100 }),
+    ];
+    expect(spent(lots, 20)).toEqual({ takes: [["cur", 5], ["roll", 5], ["t", 5]], shortfall: 5 });
+    expect(lotRemaining(lots[0], NOW + 99)).toBe(0);
+    expect(lotRemaining(lots[0], NOW + 100)).toBe(50);
+    const atStart = allocateCredits(lots, 20, NOW + 100).takes.map((take) => [take.lot._id, take.credits]);
+    expect(atStart).toEqual([["next", 20]]);
+  });
+
   it("returns what the lots can't cover as the shortfall", () => {
     expect(spent([lot("cur", "current_period", 4)], 10)).toEqual({ takes: [["cur", 4]], shortfall: 6 });
     expect(spent([], 10)).toEqual({ takes: [], shortfall: 10 });
