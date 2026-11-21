@@ -172,4 +172,30 @@ describe("decideSettlement", () => {
     expect(decide(proPayment({ servicePeriods })))
       .toEqual({ kind: "pending", paymentId: "pay_1", reason: "service_period_unknown" });
   });
+
+  describe("discount guard", () => {
+    it.each([
+      ["a period", () => proPayment({ discountId: "dsc_1" })],
+      ["a top-up", () => topUp({ discountId: "dsc_1" })],
+    ])("quarantines %s that carries a discount", (_, payment) => {
+      expect(decide(payment())).toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "discount" });
+    });
+    it("quarantines a USD total below the list price", () => {
+      expect(decide(proPayment({ totalMinor: PLANS.pro.priceUsdPerMonth * 100 - 1 }))).toMatchObject({ reason: "discount" });
+      expect(decide(topUp({ totalMinor: TOP_UP.priceUsd * 100 - 1 }))).toMatchObject({ reason: "discount" });
+    });
+    it("grants a USD total at or above the list price (tax included)", () => {
+      expect(decide(proPayment({ totalMinor: PLANS.pro.priceUsdPerMonth * 100 }))).toMatchObject({ kind: "period" });
+      expect(decide(proPayment({ totalMinor: 2360, taxMinor: 360 }))).toMatchObject({ kind: "period" });
+      expect(decide(topUp({ totalMinor: TOP_UP.priceUsd * 100 }))).toMatchObject({ kind: "top_up" });
+    });
+    it("grants a non-USD total below the USD number without a discount id (documented residual)", () => {
+      expect(decide(proPayment({ currency: "INR", totalMinor: 1500 }))).toMatchObject({ kind: "period" });
+      expect(decide(topUp({ currency: "EUR", totalMinor: 900 }))).toMatchObject({ kind: "top_up" });
+    });
+    it("only guards would-be grants", () => {
+      expect(decide(proPayment({ discountId: "dsc_1", status: "failed" }))).toMatchObject({ kind: "no_grant", reason: "failed" });
+      expect(decide(proPayment({ discountId: "dsc_1", chargeType: "plan_change" }))).toMatchObject({ kind: "no_grant" });
+    });
+  });
 });
