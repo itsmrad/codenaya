@@ -337,7 +337,8 @@ export const createBlaxelProvider = (): SandboxProvider => ({
   /**
    * A workspace snapshot of the sandbox's disk, which outlives the sandbox. Resolves once
    * it is ready, so the caller can kill the sandbox; one that fails or runs out of time is
-   * deleted. Every Blaxel sandbox can be captured, so `canSnapshot` is never false.
+   * deleted. Blaxel has no per-sandbox snapshot flag, so `canSnapshot` stays unknown; a
+   * workspace without the snapshot feature answers 403, a SandboxConfigError.
    */
   snapshot: async (sandbox, { requestTimeoutMs = BLAXEL_REQUEST_TIMEOUT_MS } = {}) => {
     if (sandbox.provider !== BLAXEL_ID) throw new Error(`Not a Blaxel sandbox: ${sandbox.provider}`);
