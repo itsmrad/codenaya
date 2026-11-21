@@ -380,19 +380,25 @@ try {
       expect(error && !(error instanceof SandboxNotFoundError), `got ${error ? blStatus(error) : "no error"}`);
       return blStatus(error);
     });
-    await check("d big writes: 5000 small files in one writeFiles; 200 binary files of 50 KB", async () => {
-      let started = Date.now();
+    // Each with the adapter's default 30 s request deadline, as a caller without its own budget gets.
+    await check("d1 big writes: 5000 small files in one writeFiles", async () => {
+      const started = Date.now();
       await sandbox.writeFiles(Array.from({ length: 5000 }, (_, index) => ({ path: `/home/user/many/d${index % 50}/f${index}.txt`, data: `${index}\n` })));
-      const small = Date.now() - started;
+      const took = Date.now() - started;
+      const files = (await sandbox.run("find /home/user/many -type f | wc -l")).stdout.trim();
+      expect(files === "5000", `${files} files`);
+      return `${seconds(took)}`;
+    });
+    await check("d2 big writes: 200 binary files of 50 KB in one writeFiles", async () => {
       const blob = (index: number) => Uint8Array.from({ length: 50 * 1024 }, (_, at) => (at * 31 + index) & 255);
-      started = Date.now();
+      const started = Date.now();
       await sandbox.writeFiles(Array.from({ length: 200 }, (_, index) => ({ path: `/home/user/bins/b${index}.bin`, data: blob(index).buffer })));
-      const binary = Date.now() - started;
-      const { stdout } = await sandbox.run("find /home/user/many -type f | wc -l; find /home/user/bins -type f -size 51200c | wc -l; sha256sum /home/user/bins/b137.bin | cut -d' ' -f1");
-      const [files, bins, digest] = stdout.trim().split("\n");
-      expect(files === "5000" && bins === "200", `${files} small files, ${bins} binaries of 50 KB`);
+      const took = Date.now() - started;
+      const { stdout } = await sandbox.run("find /home/user/bins -type f -size 51200c | wc -l; sha256sum /home/user/bins/b137.bin | cut -d' ' -f1");
+      const [bins, digest] = stdout.trim().split("\n");
+      expect(bins === "200", `${bins} binaries of 50 KB`);
       expect(digest === createHash("sha256").update(blob(137)).digest("hex"), "b137.bin differs");
-      return `5000 files in ${seconds(small)}; 200 x 50 KB in ${seconds(binary)}`;
+      return `${seconds(took)}`;
     });
     await check("c a secret printed across a chunk boundary is still redacted by the stream redactor", async () => {
       const secret = `sk_smoke_${alphanumeric(24)}`;
@@ -557,7 +563,7 @@ try {
       return `${elapsed(createdAt)} after create`;
     });
 
-    await check("8a kill; connect throws NotFound; list empties (polled every 250 ms); a kill once gone is false", async () => {
+    await check("8a kill; connect throws NotFound; list empties (polled every 250 ms)", async () => {
       expect(await provider.kill(sandbox.id) === true, "kill did not report true");
       const killedAt = Date.now();
       const connect = await provider.connect(sandbox.id).then(() => "connected", (error: unknown) => error);
@@ -573,9 +579,9 @@ try {
         return status.endsWith(" 404") || status === "TERMINATED";
       }, 60_000, 250);
       expect(gone, `get() never 404/TERMINATED: ${states.join(" > ")}`);
+      // A TERMINATED sandbox still takes a delete (batch 1): recorded, not asserted.
       const lastKill = await provider.kill(sandbox.id).catch((error: unknown) => blStatus(error));
-      expect(lastKill === false, `a kill once gone: ${lastKill}`);
-      return `measured: list empty ${listedFor} ms after kill; get(): ${states.join(" > ")}; second kill right away: ${secondKill}`;
+      return `measured: list empty ${listedFor} ms after kill; get(): ${states.join(" > ")}; second kill right away: ${secondKill}; kill once ${states.at(-1)}: ${lastKill}`;
     });
   });
 
