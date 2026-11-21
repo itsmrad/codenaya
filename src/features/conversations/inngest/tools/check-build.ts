@@ -21,8 +21,9 @@ import {
   offlineFirstInstall,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { listAll } from "@/features/sandbox-preview/server/provider/fanout";
 import { listCommands, remove, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
-import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
+import { getSandboxPool, type SandboxPool, singleProviderPool } from "@/features/sandbox-preview/server/provider/registry";
 import {
   type RunResult,
   type Sandbox,
@@ -77,7 +78,7 @@ const INSTALL_POLL_MS = 2_500;
 /** Copying the preview's node_modules; seconds for the starter. */
 const COPY_TIMEOUT_MS = 30_000;
 const CREATE_TIMEOUT_MS = 30_000;
-/** E2B reaps the sandbox after this even if the kill below is lost. */
+/** The provider reaps the sandbox after this even if the kill below is lost. */
 const SANDBOX_TIMEOUT_MS = 5 * 60_000;
 const MAX_ERROR_LINES = 40;
 /**
@@ -342,24 +343,30 @@ const previewState = async (sandbox: Sandbox, deadline: number) =>
   (await run(sandbox, PREVIEW_STATE, within(deadline, SHORT_CALL_MS), WORK_DIR)).stdout;
 
 /**
- * The owner's running preview sandbox for this project, connected, when it has
- * time left and no install running (waiting a bounded time for one to finish).
- * The query filters by the tags the preview route sets; they are checked again
- * here because they decide whose sandbox this runs in.
+ * The owner's running preview sandbox for this project, on whichever provider
+ * runs it, connected through that provider, when it has time left and no install
+ * running (waiting a bounded time for one to finish). A failing non-primary
+ * provider is skipped, as in the preview lookup. The query filters by the tags
+ * the preview route sets; they are checked again here because they decide whose
+ * sandbox this runs in.
  */
-const connectWarmSandbox = async (provider: SandboxProvider, { projectId, ownerId }: WarmPreview, deadline: number) => {
-  const running = await provider.list({
+const connectWarmSandbox = async ({ providers, health }: SandboxPool, { projectId, ownerId }: WarmPreview, deadline: number) => {
+  const running = await listAll(providers, {
     metadata: { userId: ownerId, projectId },
     limit: MAX_LIVE_SANDBOXES,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),
-  });
+  }, health && { ...health, skip: "failing" });
+  // Connect only through a provider in the pool; a preview tagged with any other is skipped.
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
   const info = running.find(
     (sandbox) =>
+      byId.has(sandbox.provider) &&
       sandbox.metadata.userId === ownerId &&
       sandbox.metadata.projectId === projectId &&
       sandbox.endAt.getTime() - Date.now() > WARM_MIN_TIME_LEFT_MS,
   );
-  if (!info) return null;
+  const provider = info && byId.get(info.provider);
+  if (!info || !provider) return null;
 
   const sandbox = await provider.connect(info.id, {
     timeoutMs: WARM_MIN_TIME_LEFT_MS,
@@ -388,13 +395,13 @@ const killBuildProcesses = (sandbox: Sandbox, dir: string) =>
  * preview's `.env` is not read, as on the cold path. Never kills the sandbox,
  * and starts the preview's dev server again if the build took it down.
  */
-const checkInWarmSandbox = async (provider: SandboxProvider, preview: WarmPreview, job: BuildJob): Promise<string | null> => {
+const checkInWarmSandbox = async (pool: SandboxPool, preview: WarmPreview, job: BuildJob): Promise<string | null> => {
   const dir = `/home/user/check-build-${randomUUID().slice(0, 8)}`;
   let sandbox: Sandbox | null = null;
   let building = false;
   let devServer: PreviewDevServer | null = null;
   try {
-    sandbox = await connectWarmSandbox(provider, preview, job.deadline);
+    sandbox = await connectWarmSandbox(pool, preview, job.deadline);
     if (!sandbox) return null;
     const before = await previewState(sandbox, job.deadline);
     if (before.includes(".env")) return null;
@@ -455,7 +462,12 @@ export const isSafeProjectPath = (path: string) =>
 type CheckOptions = {
   files: ProjectFile[];
   paths: Set<string>;
-  /** Where a new sandbox or the warm preview is found; none means no build. */
+  /**
+   * Where the warm preview is looked up and a new sandbox is made: every
+   * configured provider, with failover. None (and no `provider`) means no build.
+   */
+  sandboxes?: SandboxPool;
+  /** One provider for both instead, as a probe passes; `sandboxes` wins. */
   provider?: SandboxProvider;
   metadata?: Record<string, string>;
   preview?: WarmPreview;
@@ -492,6 +504,7 @@ type CheckOptions = {
 export const checkProjectBuild = async ({
   files,
   paths,
+  sandboxes,
   provider,
   metadata,
   preview,
@@ -554,7 +567,8 @@ export const checkProjectBuild = async ({
     }
   }
 
-  if (!provider) {
+  const pool = sandboxes ?? (provider && singleProviderPool(provider));
+  if (!pool) {
     return notBuilt("No build sandbox is configured") + notes;
   }
 
@@ -562,7 +576,7 @@ export const checkProjectBuild = async ({
   const warmPreview = framework === "next" || framework === "tanstack-start" ? undefined : preview;
   if (warmPreview) {
     if (!warmWasSlow(warmPreview.projectId)) {
-      const warm = await checkInWarmSandbox(provider, warmPreview, job);
+      const warm = await checkInWarmSandbox(pool, warmPreview, job);
       if (warm) return warm;
     }
     if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) {
@@ -572,9 +586,10 @@ export const checkProjectBuild = async ({
   }
   const afterSlowWarm = !!warmPreview && warmWasSlow(warmPreview.projectId);
 
+  // No image: each provider's own default, so an E2B template name never reaches another provider.
   let sandbox: Sandbox;
   try {
-    sandbox = await provider.create({
+    sandbox = await pool.create({
       timeoutMs: SANDBOX_TIMEOUT_MS,
       metadata: metadata ?? {},
       requestTimeoutMs: within(job.deadline, CREATE_TIMEOUT_MS),
@@ -589,6 +604,7 @@ export const checkProjectBuild = async ({
   } catch (error) {
     return unfinished(error, secrets, { path: afterSlowWarm ? "warm-then-cold" : "cold", deadline: job.deadline, sandbox });
   } finally {
+    // The handle's own kill, so it goes to whichever provider made the sandbox.
     await sandbox.kill().catch(() => {});
   }
 };
@@ -642,7 +658,7 @@ export const createCheckBuildTool = ({
             // Names stay in `paths` for the static checks; no sandbox gets a secret file's content.
             files: withoutSecretFiles(files),
             paths,
-            provider: getDefaultProviderOrNull() ?? undefined,
+            sandboxes: getSandboxPool() ?? undefined,
             metadata: { projectId, purpose: "check-build" },
             secrets,
             // The preview's sandbox has these variables in .env, where install

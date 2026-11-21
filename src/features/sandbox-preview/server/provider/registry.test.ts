@@ -18,6 +18,7 @@ import {
   getDefaultProvider,
   getDefaultProviderOrNull,
   getProvider,
+  getSandboxPool,
   isMultiProvider,
 } from "./registry";
 import { SandboxConfigError, SandboxRateLimitError } from "./types";
@@ -83,6 +84,22 @@ describe("sandbox provider registry", () => {
       expect((await createSandbox({ timeoutMs: 1, metadata: {} }, onNotice)).id).toBe("sbx_2");
       expect(mocks.create).toHaveBeenCalledTimes(2);
       expect(onNotice).not.toHaveBeenCalled();
+    });
+
+    it("pools that provider alone, creating on it exactly as createSandbox does", async () => {
+      vi.stubEnv("E2B_API_KEY", " ");
+      expect(getSandboxPool()).toBeNull();
+
+      vi.stubEnv("E2B_API_KEY", "key_1");
+      mocks.create.mockRejectedValueOnce(new RateLimitError("slow down")).mockResolvedValue(handle("sbx_4"));
+      const pool = getSandboxPool()!;
+
+      expect(pool.providers.map(({ id }) => id)).toEqual(["e2b"]);
+      expect(pool.health?.primary).toBe("e2b");
+      await expect(pool.create({ timeoutMs: 1, metadata: {} })).rejects.toBeInstanceOf(SandboxRateLimitError);
+      const sandbox = await pool.create({ timeoutMs: 1, metadata: {} });
+      expect(sandbox).toMatchObject({ provider: "e2b", id: "sbx_4" });
+      expect(mocks.create).toHaveBeenCalledTimes(2);
     });
   });
 
