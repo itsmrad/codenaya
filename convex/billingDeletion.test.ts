@@ -4,6 +4,7 @@ import { convexTest } from "convex-test";
 import { Webhook } from "svix";
 import { afterEach, expect, test, vi } from "vitest";
 
+import type { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { DELETION_BATCH } from "./billingDeletion";
 import { addModelSpend } from "./modelSpend";
@@ -15,6 +16,7 @@ const NOW = Date.UTC(2026, 10, 21);
 const ALICE = "user_alice";
 const BOB = "user_bob";
 const TERMS = { sku: "pro_monthly" as const, catalogVersion: "2026-11-17", productId: "pdt_pro", quantity: 1, credits: 2000 };
+const read = (t: ReturnType<typeof setup>, ref: Id<"billingCustomers">) => t.run(ctx => ctx.db.get("billingCustomers", ref));
 const setup = () => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
@@ -180,4 +182,29 @@ test("post-purge transcription and run usage cannot recreate user accounts/spend
   const spend = await t.run(ctx => ctx.db.query("modelSpend").take(10));
   expect(spend.map(r => r.userId)).toEqual([null]);
   expect(spend[0].spentUsd).toBeCloseTo(0.3);
+});
+
+test("a remaining resource marker reopens complete, while duplicate support batches keep attempts", async () => {
+  const t = setup(), ref = await customer(t);
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  await t.run(async ctx => {
+    await ctx.db.patch("billingCustomers", ref, { cancellationLastOutcome: "complete", cancellationRecoveryRequired: false, cancellationAttempts: 8 });
+    await ctx.db.insert("billingSubscriptions", { customerRef: ref, mode: "test_mode", subscriptionId: "sub_ended",
+      productId: TERMS.productId, status: "cancelled", cancellationRecoveryRequired: true });
+  });
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  expect(await read(t, ref)).toMatchObject({ deletedAt: NOW, cancellationLastOutcome: "pending", cancellationAttempts: 0 });
+  await t.run(ctx => ctx.db.patch("billingCustomers", ref, { cancellationLastOutcome: "support", cancellationAttempts: 8 }));
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  expect(await read(t, ref)).toMatchObject({ cancellationLastOutcome: "support", cancellationAttempts: 8 });
+});
+
+test("support billing holds do not prevent normal usage-account insertion", async () => {
+  const t = setup(), ref = await customer(t);
+  await t.run(ctx => ctx.db.patch("billingCustomers", ref, { hold: true }));
+  await t.mutation(api.credits.recordTranscriptionUsage, { internalKey: KEY, userId: ALICE, costUsd: 0.1 });
+  expect(await t.run(ctx => ctx.db.query("creditAccounts").first())).toMatchObject({ userId: ALICE, periodUsed: 15 });
 });
