@@ -356,16 +356,18 @@ const connectWarmSandbox = async ({ providers, health }: SandboxPool, { projectI
     limit: MAX_LIVE_SANDBOXES,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),
   }, health && { ...health, skip: "failing" });
+  // Connect only through a provider in the pool; a preview tagged with any other is skipped.
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
   const info = running.find(
     (sandbox) =>
+      byId.has(sandbox.provider) &&
       sandbox.metadata.userId === ownerId &&
       sandbox.metadata.projectId === projectId &&
       sandbox.endAt.getTime() - Date.now() > WARM_MIN_TIME_LEFT_MS,
   );
-  if (!info) return null;
+  const provider = info && byId.get(info.provider);
+  if (!info || !provider) return null;
 
-  // listAll tags each entry with the provider that listed it.
-  const provider = providers.find(({ id }) => id === info.provider)!;
   const sandbox = await provider.connect(info.id, {
     timeoutMs: WARM_MIN_TIME_LEFT_MS,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),

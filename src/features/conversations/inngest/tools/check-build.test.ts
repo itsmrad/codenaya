@@ -2,11 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const e2b = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn(), connect: vi.fn() }));
 const mocks = vi.hoisted(() => ({ query: vi.fn(), resolveEnv: vi.fn() }));
+/** Set by a test to answer the fan-out list itself; the real listAll otherwise. */
+const fanout = vi.hoisted(() => ({ listAll: undefined as undefined | ((...args: unknown[]) => Promise<unknown>) }));
 
 vi.mock("e2b", async (importOriginal) => ({
   ...(await importOriginal<typeof import("e2b")>()),
   Sandbox: { create: e2b.create, list: e2b.list, connect: e2b.connect },
 }));
+vi.mock("@/features/sandbox-preview/server/provider/fanout", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/sandbox-preview/server/provider/fanout")>();
+  return { ...actual, listAll: ((...args: Parameters<typeof actual.listAll>) => (fanout.listAll ?? actual.listAll)(...args)) as typeof actual.listAll };
+});
 vi.mock("@/lib/convex-client", () => ({ convex: { query: mocks.query } }));
 vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/integrations/server/env/resolve-env")>()),
@@ -88,6 +94,7 @@ const fakeSandbox = (...answers: Answer[]) => {
 };
 
 beforeEach(() => {
+  fanout.listAll = undefined;
   vi.restoreAllMocks();
   warmSlow.clear();
   vi.unstubAllEnvs();
@@ -1581,6 +1588,20 @@ describe("checkProjectBuild on any provider", () => {
     expect(warm.run).toHaveBeenCalledWith("npx tsc --noEmit -p tsconfig.app.json && npx vite build", expect.objectContaining({ cwd: expect.stringMatching(/^\/home\/user\/check-build-/) }));
     expect(warm.kill).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("skips a listed preview whose provider is not in the pool and builds cold, without throwing", async () => {
+    const primary = fakeProvider("e2b");
+    const made = seamSandbox("e2b", "e2b_cold");
+    const create = vi.fn(async () => made);
+    fanout.listAll = async () => [{ ...live("gone_preview"), provider: "test-gone" as ProviderId }];
+
+    const result = await checkOn({ providers: [primary], health: { primary: "e2b", cooldown: createProviderCooldown() }, create });
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(primary.connect).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(made.kill).toHaveBeenCalledTimes(1);
   });
 
   it("skips a non-primary provider whose list fails and still finds the primary's preview", async () => {
