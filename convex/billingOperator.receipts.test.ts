@@ -31,9 +31,9 @@ async function fixture(settled = true) {
   const alice = await customer("alice"), bob = await customer("bob");
   const terms = { sku: "top_up" as const, productId: "pdt_topup", catalogVersion: "2026-11-17", quantity: 1, credits: 1000 };
   const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", {
-    customerRef: alice, mode, intentId: "settled", paymentId: "pay_1", state: "open", terms,
+    customerRef: alice, mode, intentId: "settled", sessionId: "cks_1", state: "open", terms,
   }));
-  const fact = { paymentId: "pay_1", currency: "USD", totalMinor: 2000, taxMinor: 200,
+  const fact = { paymentId: "pay_1", sessionId: "cks_1", currency: "USD", totalMinor: 2000, taxMinor: 200,
     decision: { kind: "top_up" as const, paymentId: "pay_1", productId: terms.productId, credits: 1000, settledAt: Date.now() },
     reversal: { kind: "known" as const, refunds: [], disputes: [] } };
   const commit = async (payments: PaymentFact[] = [fact], receiptRefs: Id<"billingEvents">[] = []) => {
@@ -201,7 +201,7 @@ test.each(["unmapped", "reparent"])("repaired %s refund is claimed and reversed;
   }
   const claim = (await t.mutation(internal.billingQueue.claimCustomer, { customerRef: alice }))!;
   expect(claim.receipts.map(r => r.eventRef)).toContain(ref);
-  const fact = { paymentId: "pay_1", currency: "USD", totalMinor: 2000, taxMinor: 0,
+  const fact = { paymentId: "pay_1", sessionId: "cks_1", currency: "USD", totalMinor: 2000, taxMinor: 0,
     decision: { kind: "top_up" as const, paymentId: "pay_1", productId: terms.productId, credits: 1000, settledAt: 1 },
     reversal: { kind: "known" as const, refunds: [{ refundId: "rfd_1", status: "succeeded", amountMinor: 2000, currency: "USD", isPartial: false, counted: 2000 }], disputes: [] } };
   await t.mutation(internal.billingFulfill.commitReconciliation, { customerRef: alice,
@@ -236,16 +236,20 @@ test("settlement preserves gross, not principal, for an unreadable refund review
 test.each([null, 0, 1000])("an unsettled payment retries net of reviewed amount %s exactly once", async amount => {
   const { t, alice, purchaseRef, receipt, manual, fact, commit } = await fixture(false);
   const unknown = { ...fact, reversal: { kind: "unknown" as const, reason: "amount" as const } };
+  expect((await t.run(ctx => ctx.db.get(purchaseRef)))?.paymentId).toBeUndefined();
   const ref = await receipt(alice, "refund.succeeded", "pay_1", "retries_exhausted");
   await t.run(ctx => ctx.db.patch(ref, { state: "pending" }));
   await commit([unknown], [ref]);
-  expect(await t.run(ctx => ctx.db.get(purchaseRef))).toMatchObject({ state: "open", totalMinor: 2000 });
+  expect(await t.run(ctx => ctx.db.get(purchaseRef))).toMatchObject({ state: "open", paymentId: "pay_1", totalMinor: 2000 });
+  expect(await t.run(ctx => ctx.db.query("creditAccounts").withIndex("by_userId", q => q.eq("userId", "alice")).unique())).toBeNull();
   expect(await t.run(ctx => ctx.db.query("billingGrants").withIndex("by_purchaseRef", q => q.eq("purchaseRef", purchaseRef)).take(2))).toHaveLength(0);
   await t.run(ctx => ctx.db.patch(ref, { state: "quarantined" }));
   await manual(ref, amount);
   expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ reviewedReversalMinor: amount });
   await expect(manual(ref, amount)).rejects.toThrow("INVALID_ARGUMENT");
-  const retry = (await t.run(ctx => ctx.db.query("billingEvents").withIndex("by_customerRef_and_state_and_nextAttemptAt", q => q.eq("customerRef", alice).eq("state", "pending")).take(2)))[0];
+  const pending = await t.run(ctx => ctx.db.query("billingEvents").withIndex("by_customerRef_and_state_and_nextAttemptAt", q => q.eq("customerRef", alice).eq("state", "pending")).take(2));
+  expect(pending).toHaveLength(1);
+  const retry = pending[0];
   expect(retry.eventType).toBe("payment.reconcile");
   await commit([unknown], [retry._id]);
   await commit([unknown]);

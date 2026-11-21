@@ -25,7 +25,14 @@ Rows keep the latest operator audit with fresh `previousState`, rather than an a
   reversal of the whole payment**, not an incremental debit. It must be an integer
   between zero and the gross total. Use `null` to record no reversal with a reason; it is stored distinctly from a reviewed zero.
   Gross is saved from verified payment reads, never reconstructed from principal;
-  older rows without it refuse with `CONFLICT` until reconciled. A reviewed receipt
+  older rows without it refuse with `CONFLICT` until a fresh reconciliation (use
+  `billingQueue:redriveReceipt` for a mapped dead-letter) records verified gross.
+  A verified positive with unreadable reversals can stage its payment binding and
+  gross through an owned terms-matched checkout session/intent, or create a renewal
+  purchase from an independently owned subscription/product. Staging uses unique
+  payment and grant keys and does not settle, grant, enable an account or advance
+  paid-through. Unmatched, foreign, mode/terms mismatches and duplicates are refused.
+  Operators never choose the purchase. A reviewed receipt
   authorizes a queued payment retry to settle net of that cumulative reversal even
   when the amount remains unreadable. New unresolved negatives still fence grants.
   Existing reversals never decrease; repeated amounts do not revoke twice, and
