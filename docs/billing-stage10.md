@@ -112,3 +112,26 @@ insert missing per-user credit/spend rows. Site-wide model spend still records
 incurred costs. Billing holds alone do not block charging. No deletion helper
 shrinks paid periods, credit lots or refunds money. This PR records obligations;
 10c executes provider cancellation. Billing enablement requires 10b–10d together.
+
+## 10d: deleted billing record retention
+
+`BILLING_RECORD_RETENTION_MONTHS = 18` in `src/features/billing/retention.ts`
+means UTC calendar months after deletion, clamped to month end and preserving the
+UTC time of day. The daily 03:00 UTC retention cron pages ten customers and deletes
+at most 190 financial children plus ten customers per transaction. Destructive
+child pagination drains indexed prefixes in order: grants, adjustments, receipts,
+purchases, subscriptions, customer last. A surviving customer is the resume marker;
+the next daily sweep can recover a lost continuation. Every deletion transaction
+rechecks explicit recovery completion (`required === false`, outcome `complete`),
+resource markers, uncertain customer creation, unfinished recovery progress, pending
+controls, active adjustment holds, pending/review/unknown refunds, open purchases, unresolved counts and actual
+receipt states, reversal watch and receipt/cancellation leases. Deletion's permanent
+customer `hold` flag does not itself prevent retention expiry. Blocked customers stay
+available for support; no obligation is created or forced complete by this purge.
+
+User tombstones are never deleted. After the customer and payment mappings are gone,
+late/replayed financial events are unmapped and quarantined without grants; no email
+rebinding is attempted. No provider calls are made. New indexes support bounded
+blocker checks and child deletion; there are no required fields or data backfills.
+Existing rows missing explicit cancellation completion remain ineligible. Index
+backfill must complete before enabling the new cron; deployment is outside this PR.
