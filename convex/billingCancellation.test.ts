@@ -256,10 +256,10 @@ test("temporary receipt blocker retries with backoff and exhausts to support", a
   }
 });
 
-test.each(["marker", "renewable", "control", "processing"])("final proof refuses leftover %s outside the current cursor", async blocker => {
+test.each(["marker", "renewable", "control", "processing", "open", "unknown"])("final proof refuses leftover %s outside the current cursor", async blocker => {
   const t = setup(), ref = await customer(t); provider();
-  if (blocker === "processing") await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "hidden",
-    state: "processing", terms }));
+  if (blocker === "processing" || blocker === "open" || blocker === "unknown") await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "hidden",
+    state: blocker, terms }));
   else await t.run(ctx => ctx.db.insert("billingSubscriptions", { customerRef: ref, mode, subscriptionId: "sub_hidden", productId: "pdt_pro",
     status: blocker === "renewable" ? "active" : "cancelled", cancellationRecoveryRequired: blocker === "marker",
     ...(blocker === "control" ? { controlPendingAt: NOW, controlOperation: "cancel" as const } : {}) }));
@@ -278,4 +278,18 @@ test("ended subscription status is persisted atomically with marker clearance, r
   await phase(t, ref, "knownSubscriptions");
   await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
   expect(await t.run(ctx => ctx.db.get("billingSubscriptions", subRef))).toMatchObject({ status: "cancelled", paidThrough: NOW + 10000, cancellationRecoveryRequired: false });
+});
+
+
+test("expired open checkout becomes terminal before its marker clears without touching receipt leases", async () => {
+  const t = setup(), ref = await customer(t, { leaseId: "receipt_lease", leaseExpiresAt: NOW + 60000 }); provider();
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "expired_open",
+    state: "open", sessionId: "cks_dummy", cancellationRecoveryRequired: true, terms }));
+  await phase(t, ref, "purchases");
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "terminal", cancellationRecoveryRequired: false });
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "complete", leaseId: "receipt_lease", leaseExpiresAt: NOW + 60000 });
+  for (const table of ["purchases", "subscriptions"] as const)
+    await t.mutation(internal.billingDeletion.markDeletionBatch, { customerRef: ref, table, cursor: null });
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "complete", cancellationRecoveryRequired: false });
 });
