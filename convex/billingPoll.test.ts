@@ -7,7 +7,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
   ACTIVE_POLL_MS, CHECKOUT_SESSION_TTL_MS, IDLE_POLL_MS, markPollDue, POLL_BATCH, POLL_READS_PER_CUSTOMER, PROVIDER_CLOCK_SKEW_MS,
-  REVERSAL_WATCH_MS,
+  MAX_POLL_PAGES, REVERSAL_WATCH_MS,
 } from "./billingPoll";
 import schema from "./schema";
 
@@ -375,6 +375,48 @@ describe("checkout lock release", () => {
     expect(other).toBeDefined();
   });
 
+  test("a Pro renewal bound to its own purchase does not block an abandoned top-up; an unbound one does", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await openCheckout(t, alice);
+    // The subscriber's renewal landed within the checkout's lifetime and settled against its own purchase.
+    await t.run(ctx => ctx.db.insert("billingPurchases", {
+      customerRef: alice, mode: "test_mode", intentId: "renewal:pay_r", paymentId: "pay_r", subscriptionId: "sub_1", state: "settled",
+      terms: { sku: "pro_monthly", catalogVersion: "2026-11-17", productId: PRO, quantity: 1, credits: 2000 },
+    }));
+    stubProvider({ payments: [listed({ payment_id: "pay_r", status: "succeeded", created_at: iso(NOW + 60 * 60_000) })] });
+    expired();
+    await poll(t);
+    expect((await read(t, alice))!.pendingPurchaseRef).toBeUndefined();
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "terminal" });
+
+    const t2 = setup();
+    const bob = await customer(t2, "user_bob");
+    const bobPurchase = await openCheckout(t2, bob);
+    stubProvider({ payments: [listed({ payment_id: "pay_u", status: "succeeded", customer: { customer_id: "cus_user_bob" } })] });
+    expired();
+    await poll(t2);
+    expect((await read(t2, bob))!.pendingPurchaseRef).toBe(bobPurchase);
+  });
+
+  test("a window past the page cap closes without releasing the lock and alerts", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await openCheckout(t, alice);
+    expired();
+    const until = Date.now();
+    await t.mutation(internal.billingPoll.recordPollFindings, {
+      customerRef: alice, mode: "test_mode", window: { since: 0, until, pages: { payments: MAX_POLL_PAGES - 1 }, blocked: false }, pages: {},
+      failed: false, capped: true, findings: [], checkout: { purchaseRef, sessionId: "cks_1" }, session: { createdAt: NOW },
+    });
+    const after = (await read(t, alice))!;
+    expect(after.pendingPurchaseRef).toBe(purchaseRef);
+    expect(after).toMatchObject({ lastPolledAt: until });
+    expect(after.pollWindow).toBeUndefined();
+    expect(errors).toHaveBeenCalledWith("[billingPoll] page cap reached; lock kept", { customerRef: alice, pages: MAX_POLL_PAGES });
+  });
+
   test("a full page is paged through on the next run, then the window closes and the lock is released", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const t = setup();
@@ -454,7 +496,7 @@ describe("checkout lock release", () => {
     });
     await t.mutation(internal.billingPoll.recordPollFindings, {
       customerRef: alice, mode: "test_mode", window: { since: 0, until: Date.now(), pages: {}, blocked: false }, pages: {},
-      failed: false, findings: [], checkout: { purchaseRef, sessionId: "cks_1" }, session: { createdAt: NOW },
+      failed: false, capped: false, findings: [], checkout: { purchaseRef, sessionId: "cks_1" }, session: { createdAt: NOW },
     });
     expect(await read(t, purchaseRef)).toMatchObject({ state: "settled" });
     expect((await read(t, alice))!.pendingPurchaseRef).toBe(purchaseRef);

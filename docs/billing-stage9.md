@@ -84,8 +84,12 @@ most 200:
 
 A full page does not stall the window: the next run reads the next page
 (`page_number`, 0-based offset paging) of only the unfinished lists, in the same
-window, so offsets stay stable. When every list is read, the window closes and
-`lastPolledAt` becomes its `until`. A failed page is read again next run.
+window. Offsets stay stable because the window's item set is fixed, assuming the
+provider orders lists by creation time (undocumented). When every list is read,
+the window closes and `lastPolledAt` becomes its `until`. A failed page is read
+again next run. A list still full after `MAX_POLL_PAGES` (50) pages ends the
+window without release evidence: the lock is kept and an error is logged for an
+operator.
 
 `recordPollFindings` records **synthetic receipts** through the same
 `recordReceiptRow` helper the webhook uses, so every money effect still runs
@@ -119,7 +123,9 @@ released (purchase `terminal`, `pendingPurchaseRef` cleared) only when:
   session's creation (or after a later `expiresAt`), so every payment and
   subscription the session could have made is in it;
 - no page of the window listed a payment created since the purchase (minus the
-  margin) in any status but failed or cancelled, bound or not;
+  margin) in any status but failed or cancelled, unless it is a succeeded
+  payment already bound to another purchase of another session (a renewal, an
+  earlier top-up);
 - for Pro, no page listed, and no re-read showed, a subscription since the
   purchase in any status but cancelled, expired or failed (unknown statuses
   count as live);
@@ -143,6 +149,9 @@ released purchase by its session ID (top-up and Pro).
   second Pro checkout meanwhile is caught by the duplicate-period guard.
 - A list page the provider keeps rejecting (for example past an offset cap)
   keeps its window open and the lock held; it is logged every run.
-- Only 3 known subscriptions and 2 reversal payments are re-read per poll; a
-  customer with more is caught up over later windows only through the lists.
+- Only 3 known subscriptions and 2 reversal payments are re-read per poll, and
+  always the same ones while their receipts stay unresolved. A later status
+  change of a 4th subscription or a 3rd disputed payment is not seen by polling
+  (lists only show resources created in the lookback); its webhook or support
+  covers it.
 - An `unknown` customer or purchase needs support until the recovery stage.

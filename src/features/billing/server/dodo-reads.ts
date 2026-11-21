@@ -175,13 +175,18 @@ function disputeAmount(value: unknown, payment: PaymentRef): number | null {
   return minor === totalMinor ? totalMinor : null;
 }
 
+/** SDK `DisputeStatus` without its `dispute_` prefix; anything else is "other". Shared by the payment and list reads. */
+function disputeStatus(value: unknown): ProviderDispute["status"] {
+  const bare = typeof value === "string" && value.startsWith("dispute_") ? value.slice("dispute_".length) : "";
+  return DISPUTE_STATUSES.has(bare) ? bare as ProviderDispute["status"] : "other";
+}
+
 function dispute(item: Json, payment: PaymentRef): ProviderDispute | undefined {
   const { dispute_id: id, dispute_status: status, amount } = item;
   if (typeof id !== "string" || !PROVIDER_ID.test(id)) return undefined;
-  const bare = typeof status === "string" && status.startsWith("dispute_") ? status.slice("dispute_".length) : "";
   return {
     disputeId: id,
-    status: DISPUTE_STATUSES.has(bare) ? bare as ProviderDispute["status"] : "other",
+    status: disputeStatus(status),
     amountMinor: disputeAmount(amount, payment),
     currency: currencyCode(item.currency),
   };
@@ -288,8 +293,9 @@ export type ListWindow = { since: number; until: number; page: number };
 
 /**
  * One page (at most 20) of a customer's resources created within the window. The window is fixed
- * across pages, so offsets stay stable; `full` means the next page may hold more. Dispute
- * statuses drop their `dispute_` prefix, as on a payment read.
+ * across pages, so offsets stay stable as long as the provider orders by an immutable key such as
+ * creation time (assumed; undocumented); `full` means the next page may hold more. Dispute statuses
+ * are normalized exactly as on a payment read.
  */
 export async function listCustomerResources(
   config: DodoReconcilerConfig, kind: ListKind, providerCustomerId: string, window: ListWindow, fetchImpl: typeof fetch = fetch,
@@ -308,11 +314,10 @@ export async function listCustomerResources(
     if ((kind === "payments" || kind === "subscriptions") && providerCustomerId !== customerId(item)) throw malformed();
     const createdAt = epochMs(item.created_at);
     if (createdAt === undefined) throw malformed();
-    const raw = item[fields.status];
-    const status = kind === "disputes" && typeof raw === "string" && raw.startsWith("dispute_") ? raw.slice("dispute_".length) : raw;
+    const status = item[fields.status];
     return {
       id: providerId(item[fields.id]), createdAt,
-      status: typeof status === "string" && LISTED_STATUS.test(status) ? status : "other",
+      status: kind === "disputes" ? disputeStatus(status) : typeof status === "string" && LISTED_STATUS.test(status) ? status : "other",
       ...(kind === "refunds" || kind === "disputes" ? { paymentId: providerId(item.payment_id) } : {}),
     };
   });

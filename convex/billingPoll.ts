@@ -37,6 +37,8 @@ export const CHECKOUT_SESSION_TTL_MS = DAY_MS;
 // Provider timestamps are compared with ours, always in the direction that keeps the lock.
 export const PROVIDER_CLOCK_SKEW_MS = 5 * 60_000;
 const MAX_UNRESOLVED_CHECK = 20;
+// Pages per list per window (20 items each). Past it the window closes without release evidence.
+export const MAX_POLL_PAGES = 50;
 
 const LISTS = ["payments", "refunds", "disputes", "subscriptions"] as const satisfies readonly ListKind[];
 const KIND = { payments: "payment", refunds: "refund", disputes: "dispute", subscriptions: "subscription" } as const;
@@ -161,11 +163,13 @@ export const pollCustomer = internalAction({
     }
     // Pages still to read; a failed page is read again next run, a full one moves on to the next.
     const pages: Pages = {};
+    let capped = false;
     for (const list of LISTS) {
       const page = window.pages[list];
       if (page === undefined) continue;
       const result = await read(list, () => listCustomerResources(config, list, customerId, { since: window.since, until: window.until, page }));
       if (!result) pages[list] = page;
+      else if (result.full && page + 1 >= MAX_POLL_PAGES) capped = true;
       else if (result.full) pages[list] = page + 1;
       for (const item of result?.items ?? []) await found(KIND[list], { ...item, ...(list === "payments" ? { paymentId: item.id } : {}) });
     }
@@ -181,7 +185,7 @@ export const pollCustomer = internalAction({
       for (const dispute of payment.adjustments?.disputes ?? []) await found("dispute", { id: dispute.disputeId, status: dispute.status, paymentId });
     }
     await ctx.runMutation(internal.billingPoll.recordPollFindings, {
-      customerRef, mode, window, pages, failed, findings, ...(checkout && session ? { checkout, session } : {}),
+      customerRef, mode, window, pages, failed, capped, findings, ...(checkout && session ? { checkout, session } : {}),
     });
     return null;
   },
@@ -224,11 +228,19 @@ async function recordFindings(ctx: MutationCtx, customer: Doc<"billingCustomers"
   }
 }
 
-/** A listed payment, or for Pro a subscription, that is live and may belong to the held checkout keeps its lock. */
-function blocksRelease(finding: Finding, purchase: Doc<"billingPurchases">) {
+/**
+ * A listed payment, or for Pro a subscription, that is live and may belong to the held checkout keeps
+ * its lock. A succeeded payment already bound to another purchase of another session (a renewal, an
+ * earlier top-up) is that purchase's, never this checkout's.
+ */
+async function blocksRelease(ctx: MutationCtx, finding: Finding, purchase: Doc<"billingPurchases">) {
   const mayBelong = finding.createdAt === undefined || finding.createdAt >= purchase._creationTime - PROVIDER_CLOCK_SKEW_MS;
-  if (finding.kind === "payment") return mayBelong && !DEAD_PAYMENT.has(finding.status);
-  return finding.kind === "subscription" && purchase.terms.sku === "pro_monthly" && mayBelong && !ENDED_SUBSCRIPTION.has(finding.status);
+  if (finding.kind === "subscription") return purchase.terms.sku === "pro_monthly" && mayBelong && !ENDED_SUBSCRIPTION.has(finding.status);
+  if (finding.kind !== "payment" || !mayBelong || DEAD_PAYMENT.has(finding.status)) return false;
+  if (finding.status !== "succeeded") return true;
+  const bound = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_paymentId", q => q.eq("mode", purchase.mode).eq("paymentId", finding.id)).unique();
+  return !bound || bound._id === purchase._id || bound.sessionId === purchase.sessionId;
 }
 
 /**
@@ -254,11 +266,11 @@ async function releaseExpiredCheckout(
 export const recordPollFindings = internalMutation({
   args: {
     customerRef: v.id("billingCustomers"), mode: billingModeValidator, window: billingPollWindowValidator,
-    pages: billingPollWindowValidator.fields.pages, failed: v.boolean(), findings: v.array(findingValidator),
+    pages: billingPollWindowValidator.fields.pages, failed: v.boolean(), capped: v.boolean(), findings: v.array(findingValidator),
     checkout: v.optional(checkoutValidator), session: v.optional(sessionValidator),
   },
   returns: v.null(),
-  handler: async (ctx, { customerRef, mode, window, pages, failed, findings, checkout, session }) => {
+  handler: async (ctx, { customerRef, mode, window, pages, failed, capped, findings, checkout, session }) => {
     const customer = await ctx.db.get("billingCustomers", customerRef);
     if (!customer || customer.mode !== mode) return null;
     const now = Date.now();
@@ -266,7 +278,13 @@ export const recordPollFindings = internalMutation({
     // A stale action (its window already replaced) records findings but never advances or releases.
     const current = customer.pollWindow === undefined || customer.pollWindow.until === window.until;
     const held = customer.pendingPurchaseRef && await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
-    const blocked = window.blocked || (!!held && findings.some(finding => blocksRelease(finding, held)));
+    let blocked = window.blocked || capped;
+    for (const finding of findings) {
+      if (blocked || !held) break;
+      blocked = await blocksRelease(ctx, finding, held);
+    }
+    // An operator case: the window holds more than MAX_POLL_PAGES pages, so the lock is never released from it.
+    if (capped) console.error("[billingPoll] page cap reached; lock kept", { customerRef, pages: MAX_POLL_PAGES });
     const remaining = LISTS.some(list => pages[list] !== undefined);
     if (current && !remaining && !failed && !blocked && checkout && session) {
       await releaseExpiredCheckout(ctx, customer, checkout, session, window.until);

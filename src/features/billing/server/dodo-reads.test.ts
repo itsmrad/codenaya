@@ -330,6 +330,10 @@ describe("Dodo list and checkout reads", () => {
     const disputes = await listCustomerResources(config, "disputes", "cus_alice", SINCE, fetchReturning(json({ items: [item()] })));
     // The status drops its prefix, as on a payment read, so both name one status the same way.
     expect(disputes.items[0]).toMatchObject({ id: "dsp_1", status: "opened", paymentId: "pay_1" });
+    // Unknown or unprefixed statuses read as "other" on both paths, so one status never gets two ids.
+    const odd = await listCustomerResources(config, "disputes", "cus_alice", SINCE,
+      fetchReturning(json({ items: [item({ dispute_status: "lost" }), item({ dispute_id: "dsp_2", dispute_status: "dispute_new_stage" })] })));
+    expect(odd.items.map(i => i.status)).toEqual(["other", "other"]);
   });
 
   it("flags a full page and fails closed on another customer's item or a malformed list", async () => {
