@@ -244,7 +244,20 @@ export const repairBuild = async ({
     await killRepairSandboxes(options.runId).catch(async (error) => {
       console.error("[build-repair] could not stop the repair sandboxes", error);
       // At least the one this run knows; best effort, its provider reaps it anyway.
-      await provider.kill(target.nativeId).catch(() => {});
+      const { health } = pool;
+      if (!health || provider.id === health.primary) {
+        await provider.kill(target.nativeId).catch(() => {});
+        return;
+      }
+      // A non-primary provider is best effort, as in the fan-out: bounded, then cooled.
+      await withDeadline(
+        provider.kill(target.nativeId, { requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS }),
+        FALLBACK_LIST_TIMEOUT_MS,
+        "kill",
+      ).catch(() => {
+        health.cooldown.coolDown(provider.id);
+        console.warn(`[build-repair] Could not kill a ${provider.id} repair sandbox; it expires on its timeout`);
+      });
     });
     return null;
   });
