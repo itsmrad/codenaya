@@ -5,6 +5,8 @@ import {
   MAX_CREATION_TIMEOUT_SECONDS,
   SandboxCreationTimeoutError,
   SandboxInstance,
+  Snapshot,
+  forkSnapshot,
   getBlaxelErrorCode,
   getBlaxelErrorMessage,
   getBlaxelErrorStatus,
@@ -117,21 +119,36 @@ const getRunning = async (name: string, ms?: number) => {
   return sandbox;
 };
 
-/**
- * False once the sandbox is gone (404). While it is still DELETING, a few seconds, another
- * delete succeeds and reports DELETING just as the first did, so a second kill in that
- * window is true too. Telling them apart would take a read before every delete, and no
- * caller reads the answer.
- */
-const kill = async (name: string, { requestTimeoutMs }: RequestOptions = {}) => {
+/** False when what `request` deletes was already gone (404). */
+const remove = async (request: () => Promise<unknown>, requestTimeoutMs?: number) => {
   try {
-    await call(() => SandboxInstance.delete(name), requestTimeoutMs, "sandbox");
+    await call(request, requestTimeoutMs, "sandbox");
     return true;
   } catch (error) {
     if (error instanceof SandboxNotFoundError) return false;
     throw error;
   }
 };
+
+/**
+ * False once the sandbox is gone (404). While it is still DELETING, a few seconds, another
+ * delete succeeds and reports DELETING just as the first did, so a second kill in that
+ * window is true too. Telling them apart would take a read before every delete, and no
+ * caller reads the answer.
+ */
+const kill = (name: string, { requestTimeoutMs }: RequestOptions = {}) => remove(() => SandboxInstance.delete(name), requestTimeoutMs);
+
+/** Ownership lives in the labels, so never hand out a sandbox that lost one. */
+const assertLabels = (sandbox: SandboxInstance, metadata: Record<string, string>) => {
+  const labels = sandbox.metadata.labels ?? {};
+  if (Object.entries(metadata).some(([key, value]) => labels[key] !== value)) {
+    void SandboxInstance.delete(sandbox.metadata.name).catch(() => {});
+    throw new SandboxConfigError("Blaxel did not keep the sandbox's labels");
+  }
+};
+
+/** How often `snapshot` reads a snapshot that is still being captured. */
+const SNAPSHOT_POLL_MS = 1_000;
 
 /** E2B's default command timeout, so a `run` without `timeoutMs` behaves the same on both. */
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
@@ -276,13 +293,8 @@ export const createBlaxelProvider = (): SandboxProvider => ({
       if (error instanceof DeadlineError) void pending?.then(() => SandboxInstance.delete(name)).catch(() => {});
       throw error;
     });
-    // Ownership lives in the labels, so never hand out a sandbox that lost one.
     // TODO(B5): validate label values against Blaxel's charset once the live smoke shows it.
-    const labels = sandbox.metadata.labels ?? {};
-    if (Object.entries(metadata).some(([key, value]) => labels[key] !== value)) {
-      void SandboxInstance.delete(name).catch(() => {});
-      throw new SandboxConfigError("Blaxel did not keep the sandbox's labels");
-    }
+    assertLabels(sandbox, metadata);
     return wrap(sandbox);
   },
   connect: async (id, { requestTimeoutMs, timeoutMs } = {}) => {
@@ -322,4 +334,57 @@ export const createBlaxelProvider = (): SandboxProvider => ({
     }
   },
   kill,
+  /**
+   * A workspace snapshot of the sandbox's disk, which outlives the sandbox. Resolves once
+   * it is ready, so the caller can kill the sandbox; one that fails or runs out of time is
+   * deleted. Every Blaxel sandbox can be captured, so `canSnapshot` is never false.
+   */
+  snapshot: async (sandbox, { requestTimeoutMs = BLAXEL_REQUEST_TIMEOUT_MS } = {}) => {
+    if (sandbox.provider !== BLAXEL_ID) throw new Error(`Not a Blaxel sandbox: ${sandbox.provider}`);
+    const deadline = requestTimeoutMs ? Date.now() + requestTimeoutMs : Infinity;
+    let snapshot = await call(() => Snapshot.create({ source: { name: sandbox.id } }), requestTimeoutMs, "sandbox");
+    try {
+      while (snapshot.status.toLowerCase() === "pending") {
+        if (Date.now() + SNAPSHOT_POLL_MS >= deadline) throw new SandboxTimeoutError(`Blaxel snapshot not ready after ${requestTimeoutMs}ms`);
+        await new Promise((resolve) => setTimeout(resolve, SNAPSHOT_POLL_MS));
+        const { id } = snapshot;
+        snapshot = await call(() => Snapshot.get(id), requestTimeoutMs && deadline - Date.now());
+      }
+      if (snapshot.status.toLowerCase() !== "ready") throw new Error(`Blaxel snapshot ${snapshot.status}`);
+      return snapshot.id;
+    } catch (error) {
+      void Snapshot.delete(snapshot.id).catch(() => {});
+      throw error;
+    }
+  },
+  /**
+   * A new sandbox forked from the snapshot, with create's ownership and lifetime: the
+   * fork route sets the date policy (capped at maxSessionMs, as connect caps it), and the
+   * labels, which a fork does not take, are written right after. A fork that kept
+   * neither is deleted; the date policy bounds one whose cleanup is lost.
+   */
+  createFromSnapshot: async (snapshotId, { timeoutMs, metadata, requestTimeoutMs = BLAXEL_REQUEST_TIMEOUT_MS }) => {
+    const name = newSandboxName();
+    const endAt = Date.now() + Math.min(timeoutMs, BLAXEL_MAX_SESSION_MS);
+    const cleanUp = (error: unknown) => {
+      // A fork still running past our deadline lands later; its date policy reaps it if this misses.
+      void SandboxInstance.delete(name).catch(() => {});
+      throw error;
+    };
+    await call(
+      () => forkSnapshot({
+        path: { snapshotName: snapshotId },
+        body: { targetName: name, targetType: "sandbox", lifecycle: lifecycle(endAt) },
+        throwOnError: true,
+      }),
+      requestTimeoutMs,
+      "create",
+    ).catch(cleanUp);
+    const sandbox = await call(() => SandboxInstance.updateMetadata(name, { labels: metadata }), requestTimeoutMs, "sandbox").catch(cleanUp);
+    assertLabels(sandbox, metadata);
+    const kept = sandbox.spec.lifecycle?.expirationPolicies?.find(({ type }) => type === "date")?.value;
+    if (!kept || Date.parse(kept) > endAt) cleanUp(new SandboxConfigError("Blaxel did not keep the fork's lifetime"));
+    return wrap(sandbox);
+  },
+  deleteSnapshot: (snapshotId, { requestTimeoutMs } = {}) => remove(() => Snapshot.delete(snapshotId), requestTimeoutMs),
 });

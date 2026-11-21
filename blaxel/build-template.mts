@@ -58,8 +58,12 @@ try {
   });
   console.log(`Built in ${Math.round((Date.now() - startedAt) / 1000)}s; image: ${sandbox.spec?.runtime?.image ?? "(not reported)"}`);
   // sandbox-api came from :latest; the adapter's byte-exact run needs its NDJSON exec stream.
-  // The image is already published under IMAGE_NAME, so a failure here means rebuild it.
-  await assertExactExecStream(await SandboxInstance.get(IMAGE_NAME));
+  await assertExactExecStream(await SandboxInstance.get(IMAGE_NAME)).catch((error: unknown) => {
+    throw new Error(
+      `${IMAGE_NAME} is already published and was not rolled back: rebuild it before any sandbox uses it. ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  });
   console.log("sandbox-api streams exec output exactly (NDJSON).");
 } finally {
   rmSync(contextDir, { recursive: true, force: true });
