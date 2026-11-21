@@ -106,7 +106,7 @@ export const resolveReceipt = internalMutation({
       await ctx.db.patch("billingEvents", eventRef, { state: "processed" });
     }
     await ctx.db.patch("billingEvents", eventRef, { resolution: { ...resolution, previousState: JSON.stringify(previous) } });
-    console.info("[billingOperator] resolved", { eventRef });
+    console.info("[billingOperator] resolved", { action, operator, eventRef });
     return null;
   },
 });
@@ -124,7 +124,7 @@ export const placeSupportHold = internalMutation({
       placedBy: { ...placedBy, previousState: "absent" },
     });
     await ctx.db.patch("billingCustomers", customerRef, { inputRevision: customer.inputRevision + 1 });
-    console.info("[billingOperator] hold placed", { customerRef, adjustmentRef: ref });
+    console.info("[billingOperator] hold placed", { action: placedBy.action, operator, customerRef, adjustmentRef: ref });
     return ref;
   },
 });
@@ -147,7 +147,7 @@ export const releaseHold = internalMutation({
       releasedBy: { ...releasedBy, previousState: JSON.stringify({ holdActive: row.holdActive, status: row.status }) },
     });
     await ctx.db.patch("billingCustomers", customer._id, { inputRevision: customer.inputRevision + 1 });
-    console.info("[billingOperator] hold released", { adjustmentRef });
+    console.info("[billingOperator] hold released", { action: releasedBy.action, operator, adjustmentRef });
     return null;
   },
 });
@@ -171,8 +171,11 @@ export const resolveUnreadableReversal = internalMutation({
     }
     const purchase = await ctx.db.query("billingPurchases")
       .withIndex("by_mode_and_paymentId", q => q.eq("mode", customer.mode).eq("paymentId", row.paymentId)).unique();
-    if (!purchase || purchase.customerRef !== customerRef || !Number.isSafeInteger(purchase.totalMinor) || purchase.totalMinor! <= 0) {
-      throw appError("INVALID_ARGUMENT", "Payment needs an owned purchase with a known gross total");
+    if (!purchase || purchase.customerRef !== customerRef) {
+      throw appError("INVALID_ARGUMENT", "Payment needs an owned purchase");
+    }
+    if (!Number.isSafeInteger(purchase.totalMinor) || purchase.totalMinor! <= 0) {
+      throw appError("CONFLICT", "Verified gross total unavailable; reconcile the payment before review");
     }
     if (amountMinor !== null && (!Number.isSafeInteger(amountMinor) || amountMinor < 0 || amountMinor > purchase.totalMinor!)) {
       throw appError("INVALID_ARGUMENT", "Amount must be within the payment gross total");
@@ -181,13 +184,14 @@ export const resolveUnreadableReversal = internalMutation({
       await applyPurchaseReversal(ctx, customer, purchase, amountMinor, purchase.totalMinor!, await ownerDeleted(ctx, customer));
     }
     await ctx.db.patch("billingEvents", eventRef, {
-      state: "processed", reviewedReversalMinor: amountMinor ?? 0,
+      state: "processed", reviewedReversalMinor: amountMinor,
       resolution: { ...resolution, previousState: JSON.stringify({ state: row.state, customerRef, quarantineReason: row.quarantineReason, reversedMinor: purchase.reversedMinor ?? 0 }) },
     });
+    await ctx.db.patch("billingPurchases", purchase._id, { reviewedReversalRef: eventRef });
     await ctx.db.patch("billingCustomers", customerRef, { unresolvedReceipts: customer.unresolvedReceipts - 1, inputRevision: customer.inputRevision + 1 });
     await queuePaymentRead(ctx, customerRef, row.paymentId, resolution.at);
     await scheduleCustomer(ctx, customerRef);
-    console.info("[billingOperator] reversal resolved", { customerRef, eventRef, purchaseRef: purchase._id });
+    console.info("[billingOperator] reversal resolved", { action: resolution.action, operator, customerRef, eventRef, purchaseRef: purchase._id });
     return null;
   },
 });

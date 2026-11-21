@@ -6,13 +6,22 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { recordAdjustments, hasActiveHold } from "./billingReversals";
 import schema from "./schema";
+import type { PaymentFact } from "./billingFulfill";
 
 const modules = import.meta.glob("./**/*.ts");
 const note = { operator: "support", reason: "Reviewed privately" };
 const mode = "test_mode" as const;
 beforeEach(() => { vi.useFakeTimers(); vi.spyOn(console, "info").mockImplementation(() => {}); });
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
-async function fixture() {
+afterEach(() => {
+  for (const [message, fields] of vi.mocked(console.info).mock.calls) {
+    if (String(message).startsWith("[billingOperator]")) {
+      expect(fields).toMatchObject({ action: expect.any(String), operator: note.operator });
+      expect(JSON.stringify(fields)).not.toContain(note.reason);
+    }
+  }
+  vi.useRealTimers(); vi.restoreAllMocks();
+});
+async function fixture(settled = true) {
   const t = convexTest(schema, modules);
   const customer = async (userId: string) => t.run(async ctx => {
     await ctx.db.insert("users", { clerkUserId: userId, updatedAt: 1 });
@@ -21,11 +30,18 @@ async function fixture() {
   });
   const alice = await customer("alice"), bob = await customer("bob");
   const terms = { sku: "top_up" as const, productId: "pdt_topup", catalogVersion: "2026-11-17", quantity: 1, credits: 1000 };
-  const purchaseRef = await t.run(async ctx => {
-    const ref = await ctx.db.insert("billingPurchases", { customerRef: alice, mode, intentId: "settled", paymentId: "pay_1", state: "settled", terms, totalMinor: 2000, currency: "USD" });
-    await ctx.db.insert("billingGrants", { customerRef: alice, mode, userId: "alice", purchaseRef: ref, sourceKey: "payment:pay_1", kind: "top_up", quantity: 1000, consumed: 0, revoked: 0, expiresAt: Date.now() + 100000 });
-    return ref;
-  });
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", {
+    customerRef: alice, mode, intentId: "settled", paymentId: "pay_1", state: "open", terms,
+  }));
+  const fact = { paymentId: "pay_1", currency: "USD", totalMinor: 2000, taxMinor: 200,
+    decision: { kind: "top_up" as const, paymentId: "pay_1", productId: terms.productId, credits: 1000, settledAt: Date.now() },
+    reversal: { kind: "known" as const, refunds: [], disputes: [] } };
+  const commit = async (payments: PaymentFact[] = [fact], receiptRefs: Id<"billingEvents">[] = []) => {
+    const c = (await t.run(ctx => ctx.db.get(alice)))!;
+    return t.mutation(internal.billingFulfill.commitReconciliation, { customerRef: alice,
+      fence: { generation: c.generation, inputRevision: c.inputRevision }, receiptRefs, payments, subscriptions: [] });
+  };
+  if (settled) await commit();
   const receipt = async (customerRef?: Id<"billingCustomers">, eventType = "refund.succeeded", paymentId = "pay_1", quarantineReason = "unsupported") => t.run(async ctx => {
     const ref = await ctx.db.insert("billingEvents", { customerRef, mode, eventType, paymentId, webhookId: crypto.randomUUID(),
       providerCustomerId: customerRef ? undefined : "cus_conflict", state: "quarantined", quarantineReason: quarantineReason as "unsupported",
@@ -41,7 +57,7 @@ async function fixture() {
     const c = (await t.run(ctx => ctx.db.get(customerRef)))!;
     return t.mutation(internal.billingOperator.resolveUnreadableReversal, { customerRef, eventRef, amountMinor, generation: c.generation, inputRevision: c.inputRevision, ...note });
   };
-  return { t, alice, bob, purchaseRef, receipt, resolve, manual, terms };
+  return { t, alice, bob, purchaseRef, receipt, resolve, manual, terms, fact, commit };
 }
 
 test.each(["unmapped", "digest_mismatch"])("attaches a conflicting unmapped negative (%s) with audit and counters", async reason => {
@@ -119,10 +135,10 @@ test("no reversal is audited; wrong customer, mode, state, gross and stale fence
   await t.run(ctx => ctx.db.patch(purchaseRef, { customerRef: bob }));
   await expect(manual(ref, 100)).rejects.toThrow();
   await t.run(ctx => ctx.db.patch(purchaseRef, { customerRef: alice, totalMinor: undefined }));
-  await expect(manual(ref, 100)).rejects.toThrow();
+  await expect(manual(ref, 100)).rejects.toThrow("CONFLICT");
   await t.run(ctx => ctx.db.patch(purchaseRef, { totalMinor: 2000 }));
   await manual(ref, null);
-  expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ reviewedReversalMinor: 0, resolution: { ...note } });
+  expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ reviewedReversalMinor: null, resolution: { ...note } });
   expect((await t.run(ctx => ctx.db.query("billingGrants").take(2)))[0].revoked).toBe(0);
 });
 
@@ -203,4 +219,45 @@ test.each(["unmapped", "reparent"])("repaired %s refund is claimed and reversed;
   })).toBe("committed");
   expect(await t.run(ctx => ctx.db.get(next))).toMatchObject({ state: "settled" });
   expect(await t.run(ctx => ctx.db.get(alice))).toMatchObject({ unresolvedReceipts: 0 });
+});
+
+test("settlement preserves gross, not principal, for an unreadable refund review", async () => {
+  const { t, alice, purchaseRef, receipt, manual, fact, commit } = await fixture();
+  expect(await t.run(ctx => ctx.db.get(purchaseRef))).toMatchObject({ totalMinor: 2000, principalMinor: 1800 });
+  const ref = await receipt(alice, "refund.succeeded", "pay_1", "retries_exhausted");
+  await t.run(ctx => ctx.db.patch(ref, { state: "pending" }));
+  await commit([{ ...fact, reversal: { kind: "unknown", reason: "amount" } }], [ref]);
+  expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ state: "pending" });
+  await t.run(ctx => ctx.db.patch(ref, { state: "quarantined" }));
+  await manual(ref, 2000);
+  expect(await t.run(ctx => ctx.db.get(purchaseRef))).toMatchObject({ reversedMinor: 2000, revokedCredits: 1000 });
+});
+
+test.each([null, 0, 1000])("an unsettled payment retries net of reviewed amount %s exactly once", async amount => {
+  const { t, alice, purchaseRef, receipt, manual, fact, commit } = await fixture(false);
+  const unknown = { ...fact, reversal: { kind: "unknown" as const, reason: "amount" as const } };
+  const ref = await receipt(alice, "refund.succeeded", "pay_1", "retries_exhausted");
+  await t.run(ctx => ctx.db.patch(ref, { state: "pending" }));
+  await commit([unknown], [ref]);
+  expect(await t.run(ctx => ctx.db.get(purchaseRef))).toMatchObject({ state: "open", totalMinor: 2000 });
+  expect(await t.run(ctx => ctx.db.query("billingGrants").withIndex("by_purchaseRef", q => q.eq("purchaseRef", purchaseRef)).take(2))).toHaveLength(0);
+  await t.run(ctx => ctx.db.patch(ref, { state: "quarantined" }));
+  await manual(ref, amount);
+  expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ reviewedReversalMinor: amount });
+  await expect(manual(ref, amount)).rejects.toThrow("INVALID_ARGUMENT");
+  const retry = (await t.run(ctx => ctx.db.query("billingEvents").withIndex("by_customerRef_and_state", q => q.eq("customerRef", alice).eq("state", "pending")).take(2)))[0];
+  expect(retry.eventType).toBe("payment.reconcile");
+  await commit([unknown], [retry._id]);
+  await commit([unknown]);
+  const settled = (await t.run(ctx => ctx.db.get(purchaseRef)))!;
+  expect(settled.state).toBe("settled");
+  expect(settled.revokedCredits ?? 0).toBe(amount ? 500 : 0);
+  const lots = await t.run(ctx => ctx.db.query("billingGrants").withIndex("by_purchaseRef", q => q.eq("purchaseRef", purchaseRef)).take(2));
+  expect(lots).toHaveLength(1);
+  expect(lots[0].quantity - lots[0].revoked).toBe(amount ? 500 : 1000);
+  // A subsequent unreadable negative is never covered by the earlier review.
+  const later = await receipt(alice);
+  await t.run(ctx => ctx.db.patch(later, { state: "pending" }));
+  expect(await commit([unknown], [later])).toBe("blocked");
+  expect(await t.run(ctx => ctx.db.get(later))).toMatchObject({ state: "pending" });
 });

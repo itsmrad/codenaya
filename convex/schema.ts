@@ -911,6 +911,7 @@ export default defineSchema({
     resolution: v.optional(billingOperatorAuditValidator),
     // Reversal bookkeeping (convex/billingReversals.ts): the gross total the ratio uses and the credits revoked so far.
     totalMinor: v.optional(v.number()),
+    reviewedReversalRef: v.optional(v.id("billingEvents")),
     revokedCredits: v.optional(v.number()),
   })
     .index("by_mode_and_intentId", ["mode", "intentId"])
@@ -920,7 +921,7 @@ export default defineSchema({
 
   billingEvents: defineTable({
     resolution: v.optional(billingOperatorAuditValidator),
-    reviewedReversalMinor: v.optional(v.number()),
+    reviewedReversalMinor: v.optional(v.union(v.number(), v.null())),
     // Absent for a verified receipt whose customer is not mapped yet; stored quarantined.
     customerRef: v.optional(v.id("billingCustomers")),
     mode: billingModeValidator,
