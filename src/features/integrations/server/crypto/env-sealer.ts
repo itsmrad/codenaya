@@ -18,6 +18,7 @@
 
 import { decryptWithDek, encryptWithDek, generateDek } from "./envelope";
 import { createKekProvider, resolveKekProviderId } from "./index";
+import { rewrapSealedSecret, type RewrapResult } from "./rewrap";
 import {
   AWS_KMS_PROVIDER_ID,
   createAwsKmsEnvKek,
@@ -32,6 +33,10 @@ export type { EnvDestination } from "./kek/aws-kms";
 export interface EnvSealer {
   seal(value: string, secretRef: string, destination: EnvDestination): Promise<SealedSecret>;
   open(sealed: SealedSecret, secretRef: string, destination: EnvDestination): Promise<string>;
+  /** Moves the DEK wrap to the current key with the same context; the value is never decrypted. */
+  rewrap(sealed: SealedSecret, destination: EnvDestination): Promise<RewrapResult>;
+  /** Throws unless the DEK unwraps under the current key; the value is never decrypted. */
+  checkDek(sealed: SealedSecret, destination: EnvDestination): Promise<void>;
 }
 
 export interface EnvSealerDeps {
@@ -55,6 +60,17 @@ export function createEnvSealer(deps: EnvSealerDeps = {}): EnvSealer {
       destination,
     );
 
+  function providerFor(sealed: SealedSecret, destination: EnvDestination): KekProvider {
+    if (sealed.kekProvider === AWS_KMS_PROVIDER_ID) return kmsFor(destination);
+    const provider = (legacy ??= (deps.legacy ?? (() => createKekProvider(resolveKekProviderId())))());
+    if (sealed.kekProvider !== provider.id) {
+      throw new Error(
+        `Env var was sealed with KEK provider "${sealed.kekProvider}" but "${provider.id}" is configured.`,
+      );
+    }
+    return provider;
+  }
+
   return {
     async seal(value, secretRef, destination) {
       const provider = kmsFor(destination);
@@ -73,24 +89,23 @@ export function createEnvSealer(deps: EnvSealerDeps = {}): EnvSealer {
     },
 
     async open(sealed, secretRef, destination) {
-      let provider: KekProvider;
-      if (sealed.kekProvider === AWS_KMS_PROVIDER_ID) {
-        provider = kmsFor(destination);
-      } else {
-        provider = legacy ??= (deps.legacy ?? (() => createKekProvider(resolveKekProviderId())))();
-        if (sealed.kekProvider !== provider.id) {
-          throw new Error(
-            `Env var was sealed with KEK provider "${sealed.kekProvider}" but "${provider.id}" is configured.`,
-          );
-        }
-      }
-
-      const dek = await provider.unwrapDek(sealed.wrappedDek, sealed.kekKeyId);
+      const dek = await providerFor(sealed, destination).unwrapDek(sealed.wrappedDek, sealed.kekKeyId);
       try {
         return decryptWithDek(sealed, dek, envAad(secretRef));
       } finally {
         dek.fill(0);
       }
+    },
+
+    rewrap: (sealed, destination) =>
+      rewrapSealedSecret(sealed, providerFor(sealed, destination), kmsFor(destination)),
+
+    async checkDek(sealed, destination) {
+      const provider = kmsFor(destination);
+      if (sealed.kekProvider !== provider.id || sealed.kekKeyId !== provider.activeKeyId) {
+        throw new Error("Env var is not wrapped under the current KMS key.");
+      }
+      (await provider.unwrapDek(sealed.wrappedDek, sealed.kekKeyId)).fill(0);
     },
   };
 }

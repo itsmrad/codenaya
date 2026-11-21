@@ -9,6 +9,7 @@ import { exportToGithub } from "@/features/projects/inngest/export-to-github";
 import { pushToGithub } from "@/features/projects/inngest/push-to-github";
 import { pullFromGithub } from "@/features/projects/inngest/pull-from-github";
 import { sweepRevokedRuntimes } from "@/features/sandbox-preview/inngest/sweep-revoked-runtimes";
+import { rewrapEnvKeys } from "@/features/integrations/inngest/rewrap-env-keys";
 
 // Create an API that serves zero functions
 export const { GET, POST, PUT } = serve({
@@ -22,5 +23,6 @@ export const { GET, POST, PUT } = serve({
     pushToGithub,
     pullFromGithub,
     sweepRevokedRuntimes,
+    rewrapEnvKeys,
   ],
 });

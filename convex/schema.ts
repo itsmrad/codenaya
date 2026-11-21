@@ -1131,6 +1131,9 @@ export default defineSchema({
     ciphertext: v.optional(v.string()),
     iv: v.optional(v.string()),
     authTag: v.optional(v.string()),
+    // Recovery epoch the value was saved under (stage 7 stamps it on save and
+    // owner Restore only). The KMS re-wrap runner never changes it.
+    recoveryEpoch: v.optional(v.number()),
 
     maskedPreview: v.string(),
     // "integration" values were written by the agent while provisioning.

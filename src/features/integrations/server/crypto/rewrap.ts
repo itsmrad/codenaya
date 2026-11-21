@@ -62,7 +62,12 @@ export async function rewrapSealedSecret(
   }
 
   const dek = await from.unwrapDek(sealed.wrappedDek, sealed.kekKeyId);
-  const wrappedDek = await to.wrapDek(dek);
+  let wrappedDek: string;
+  try {
+    wrappedDek = await to.wrapDek(dek);
+  } finally {
+    dek.fill(0);
+  }
 
   return {
     changed: true,
