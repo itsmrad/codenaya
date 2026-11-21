@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { fetchMutation } from "convex/nextjs";
 import { z } from "zod";
-import { api } from "../../../../../convex/_generated/api";
+import { api } from "../../../../convex/_generated/api";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { getAppError } from "@/lib/convex-error";
 import { parseJsonBody } from "@/lib/parse-json-body";
