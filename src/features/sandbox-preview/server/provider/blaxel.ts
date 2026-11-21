@@ -117,6 +117,12 @@ const getRunning = async (name: string, ms?: number) => {
   return sandbox;
 };
 
+/**
+ * False once the sandbox is gone (404). While it is still DELETING, a few seconds, another
+ * delete succeeds and reports DELETING just as the first did, so a second kill in that
+ * window is true too. Telling them apart would take a read before every delete, and no
+ * caller reads the answer.
+ */
 const kill = async (name: string, { requestTimeoutMs }: RequestOptions = {}) => {
   try {
     await call(() => SandboxInstance.delete(name), requestTimeoutMs, "sandbox");
@@ -130,7 +136,7 @@ const kill = async (name: string, { requestTimeoutMs }: RequestOptions = {}) => 
 /** E2B's default command timeout, so a `run` without `timeoutMs` behaves the same on both. */
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 
-/** The SDK hands output over one line at a time with its newline stripped; E2B's chunks keep theirs. */
+/** `streamLogs` (start's path) hands output over one line at a time with its newline stripped; E2B's chunks keep theirs. */
 const lines = (onData?: (data: string) => void) => onData && ((line: string) => onData(`${line}\n`));
 
 /** The seam's view of a Blaxel sandbox. */
@@ -141,7 +147,7 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
     provider: BLAXEL_ID,
     id: name,
     run: async (command, { cwd, envs, timeoutMs = DEFAULT_RUN_TIMEOUT_MS, onStdout, onStderr, requestTimeoutMs } = {}) => {
-      // The output comes from the streamed lines, not the result, which may hold only its tail.
+      // The output comes from the streamed chunks, not the result, which keeps only its last ~64 KB.
       let stdout = "";
       let stderr = "";
       const startedAt = Date.now();
@@ -154,14 +160,15 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
             waitForCompletion: true,
             timeout: Math.ceil(timeoutMs / 1000),
             // Always stream: a held, silent request is cut by Blaxel's edge after
-            // 120s, while a streamed one gets keepalives.
-            onStdout: (line) => {
-              stdout += `${line}\n`;
-              onStdout?.(`${line}\n`);
+            // 120s, while a streamed one gets keepalives. Its chunks are raw output,
+            // newlines kept and split anywhere, as E2B's are: pass them on unchanged.
+            onStdout: (chunk) => {
+              stdout += chunk;
+              onStdout?.(chunk);
             },
-            onStderr: (line) => {
-              stderr += `${line}\n`;
-              onStderr?.(`${line}\n`);
+            onStderr: (chunk) => {
+              stderr += chunk;
+              onStderr?.(chunk);
             },
           }),
         // The request outlives the command: its own budget, else the command's limit plus 30 s.
