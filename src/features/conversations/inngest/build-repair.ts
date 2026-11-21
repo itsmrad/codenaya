@@ -19,8 +19,8 @@ import {
   WORK_DIR,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
-import { FALLBACK_LIST_TIMEOUT_MS, listAll } from "@/features/sandbox-preview/server/provider/fanout";
-import { runOrThrow, withDeadline } from "@/features/sandbox-preview/server/provider/helpers";
+import { killListed, listAll } from "@/features/sandbox-preview/server/provider/fanout";
+import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
 import { parsePublicSandboxIdOrNull, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
 import { type SandboxPool, getSandboxPool } from "@/features/sandbox-preview/server/provider/registry";
 import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
@@ -66,27 +66,12 @@ const REPAIR_PURPOSE = "build-repair";
  * resilience): the primary fails closed as before; a non-primary one whose list
  * or kill fails is cooled and skipped, and its sandboxes expire on their timeout.
  */
-// shortcut: the same kill loop as `killProjectPreviews`; a shared fan-out kill helper can replace both.
 export const killRepairSandboxes = async (runId: string) => {
   const pool = getSandboxPool();
   if (!pool) return;
   const { providers, health } = pool;
-  const byId = new Map(providers.map((provider) => [provider.id, provider]));
   const running = await listAll(providers, { metadata: { purpose: REPAIR_PURPOSE, runId } }, health && { ...health, skip: "failing" });
-  await Promise.all(running.map(async ({ provider, id }) => {
-    const target = byId.get(provider);
-    if (!target) return;
-    if (!health || provider === health.primary) {
-      await target.kill(id);
-      return;
-    }
-    try {
-      await withDeadline(target.kill(id, { requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS }), FALLBACK_LIST_TIMEOUT_MS, "kill");
-    } catch {
-      health.cooldown.coolDown(provider);
-      console.warn(`[build-repair] Could not kill a ${provider} repair sandbox; it expires on its timeout`);
-    }
-  }));
+  await killListed(providers, running, health, "repair sandbox");
 };
 
 /**

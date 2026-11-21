@@ -45,6 +45,38 @@ export async function listAll(providers: readonly SandboxProvider[], query: List
   return lists.flat();
 }
 
+/**
+ * Kills `listAll`'s sandboxes, each through the provider that listed it; one no
+ * provider here listed is left alone. The primary (every provider, without
+ * health) fails closed. A non-primary kill is bounded like its list and, when
+ * it fails, cooled and skipped: that sandbox expires on its own timeout.
+ * Resolves with whether each one was killed. `what` names it in the warning.
+ */
+export async function killListed(
+  providers: readonly SandboxProvider[],
+  listed: readonly { provider: ProviderId; id: string }[],
+  health: FanoutHealth | undefined,
+  what: string,
+) {
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
+  return Promise.all(listed.map(async ({ provider, id }) => {
+    const target = byId.get(provider);
+    if (!target) return false;
+    if (!health || provider === health.primary) {
+      await target.kill(id);
+      return true;
+    }
+    try {
+      await withDeadline(target.kill(id, { requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS }), FALLBACK_LIST_TIMEOUT_MS, "kill");
+      return true;
+    } catch {
+      health.cooldown.coolDown(provider);
+      console.warn(`[sandbox-provider] Could not kill a ${provider} ${what}; it expires on its timeout`);
+      return false;
+    }
+  }));
+}
+
 export async function countLive(providers: readonly SandboxProvider[], metadata: SandboxMeta, policy?: FanoutPolicy) {
   return (await listAll(providers, { metadata }, policy)).length;
 }
