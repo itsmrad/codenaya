@@ -19,7 +19,6 @@ import {
 } from "@/features/integrations/env-keys";
 import { publicNameLooksSecret, publicValueSecretRule } from "@/features/integrations/credential-guard";
 import {
-  useDeleteEnvVar,
   useEnvVars,
   useSetPublicEnvVar,
 } from "@/features/integrations/hooks/use-integrations";
@@ -81,7 +80,6 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
     (name) => !envVars?.some((envVar) => envVar.key === name),
   );
   const setPublicEnvVar = useSetPublicEnvVar();
-  const deleteEnvVar = useDeleteEnvVar();
 
   const form = useForm({
     defaultValues: { key: "", value: "" },
@@ -126,9 +124,10 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
     });
   };
 
-  const handleDelete = async (id: Id<"projectEnvVars">, key: string) => {
+  const handleDelete = async (key: string) => {
     try {
-      await deleteEnvVar({ id });
+      // Through the route, which also stops previews still holding the value.
+      await ky.delete("/api/env-vars", { json: { projectId, key } });
       toast.success(`Deleted ${key}`);
     } catch {
       toast.error(`Unable to delete ${key}`);
@@ -286,7 +285,7 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
                   className="size-7 hover:text-destructive"
                   title="Delete"
                   aria-label={`Delete ${envVar.key}`}
-                  onClick={() => handleDelete(envVar._id, envVar.key)}
+                  onClick={() => handleDelete(envVar.key)}
                 >
                   <Trash2Icon className="size-3.5" />
                 </Button>
