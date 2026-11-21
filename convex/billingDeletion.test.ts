@@ -67,7 +67,7 @@ test("pages all historical resources without an active pointer; financial obliga
       await ctx.db.insert("billingPurchases", { customerRef: ref, mode: "test_mode", intentId: `i_${i}`, terms: TERMS,
         state: i % 2 ? "processing" : "unknown" });
       await ctx.db.insert("billingSubscriptions", { customerRef: ref, mode: "test_mode", subscriptionId: `s_${i}`,
-        productId: TERMS.productId, status: i % 2 ? "active" : "cancelled", paidThrough: NOW + 100, serviceEnd: NOW + 100 });
+        productId: TERMS.productId, status: i % 2 ? "active" : "pending", paidThrough: NOW + 100, serviceEnd: NOW + 100 });
     }
   });
   await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
