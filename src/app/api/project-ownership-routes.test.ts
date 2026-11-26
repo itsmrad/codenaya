@@ -24,8 +24,8 @@ vi.mock("@clerk/nextjs/server", () => ({
   }),
 }));
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  const { withEnvPlatform, withPlatformPermission } = await import("@/features/ai-providers/server/active-platform.mock");
+  return { convex: { query: withEnvPlatform(mocks.query), mutation: withPlatformPermission(mocks.mutation) } };
 });
 vi.mock("@/inngest/client", () => ({
   inngest: { send: mocks.inngestSend },

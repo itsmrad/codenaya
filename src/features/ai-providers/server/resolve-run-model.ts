@@ -11,6 +11,10 @@ import {
   minRunCredits,
 } from "@/features/billing/credits";
 import { MODEL_LIMIT_CODE, spendRefusal, spendRefusalMessage } from "@/features/billing/model-spend";
+import { allowedOrdinaryModels } from "@/features/billing/model-access";
+import { billingRolloutEnabled } from "@/features/billing/server/dodo-config";
+import { readPlatformPermission } from "@/features/billing/server/platform-permission";
+import type { EntitlementView } from "@/features/billing/entitlement";
 import { PLANS } from "@/features/billing/plans";
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
 
@@ -110,7 +114,7 @@ export interface RunModelChoice {
 export class ModelChoiceError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 402 | 403 | 503,
+    readonly status: 400 | 402 | 403 | 404 | 503,
     readonly code?: string,
   ) {
     super(message);
@@ -144,6 +148,16 @@ async function refuseOverSpendLimit(args: Parameters<typeof spendLimitReached>[0
     );
   }
 }
+
+function assertPermission(view: EntitlementView, byok = false) {
+  if (view.reason === "deleted") throw new ModelChoiceError("User not found", 404);
+  if (!byok && !view.platformAllowed) {
+    throw new ModelChoiceError("Billing access is on hold", 403, "billing_on_hold");
+  }
+}
+
+const planModelUnavailable = () =>
+  new ModelChoiceError("Model is not available on this plan", 403, "plan_model_unavailable");
 
 const toChoice = (input: ModelChoiceInput): AgentModelChoice =>
   typeof input === "object" ? input : { modelId: input ?? "" };
@@ -202,49 +216,53 @@ export async function validateModelChoice({
 }): Promise<RunModelChoice & { promoKind?: PromoModelKind }> {
   const { keyId, modelId } = toChoice(model);
   if (!keyId) {
-    const [catalog, account] = await Promise.all([
+    const [catalog, account, view] = await Promise.all([
       platformCatalog(internalKey),
       convex.query(api.credits.getForServer, { internalKey, userId }),
+      readPlatformPermission({ internalKey, userId }),
     ]);
+    assertPermission(view);
+    const allowed = allowedOrdinaryModels(catalog, view, { restrictFree: billingRolloutEnabled() });
     const auto = modelId === AUTO_MODEL_ID;
-    const configured = catalog.models.filter((m) => isPlatformConfigured(m.provider));
+    const configured = allowed.filter((m) => isPlatformConfigured(m.provider));
     // Auto routes around a model at its spend limit instead of refusing the send.
     const reached = auto
       ? await Promise.all(configured.map((m) => spendLimitReached({ internalKey, userId, model: m })))
       : [];
-    const creditsLeft = creditStanding(PLANS[account?.plan ?? "free"], account, Date.now()).left;
+    const enforce = view.billingEnabled || process.env.CREDIT_LIMITS_ENFORCED === "true";
+    const creditsLeft = view.billingEnabled ? view.creditsLeft : creditStanding(PLANS.free, account, Date.now()).left;
+    const budgetRefusal = (minimum: number) => view.billingEnabled
+      ? (view.creditsLeft < minimum ? (view.dayLeft !== null && view.dayLeft < minimum ? "day_used_up" : "month_used_up") : null)
+      : creditRefusal(PLANS.free, account, Date.now(), minimum);
     const affordable = (m: RoutedModel) =>
-      process.env.CREDIT_LIMITS_ENFORCED !== "true" || minRunCredits(m.pricing) <= creditsLeft;
+      !enforce || minRunCredits(m.pricing) <= creditsLeft;
     const eligible = configured.filter((m, i) => !reached[i] && affordable(m));
-    let routed = auto ? autoRouteModel(
-      eligible,
-      // Images need a vision model whatever the task, plan mode included.
-      withImages ? "vision" : task,
-      catalog.autoModelIds,
-    ) : undefined;
+    const route = (models: RoutedModel[]) => billingRolloutEnabled() && view.plan === "free"
+      ? models.find((m) => m.id === catalog.defaultModelId && (!withImages || m.vision))
+      : autoRouteModel(models, withImages ? "vision" : task, catalog.autoModelIds);
+    let routed = auto ? route(eligible) : undefined;
     // Text Auto already falls back outside an unusable pool. Keep that fallback affordable too.
     if (auto && !routed && !withImages && configured.some((m) => !affordable(m))) {
       const pickable = pickableModels(eligible);
       routed = pickable.find((m) => m.id === catalog.defaultModelId) ?? pickable[0];
     }
     if (auto && !routed) {
-      const unaffordable = autoRouteModel(
-        configured.filter((_, i) => !reached[i]),
-        withImages ? "vision" : task,
-        catalog.autoModelIds,
-      );
+      const unaffordable = route(configured.filter((_, i) => !reached[i]));
       if (unaffordable && !affordable(unaffordable)) {
-        const refusal = creditRefusal(PLANS[account?.plan ?? "free"], account, Date.now(), minRunCredits(unaffordable.pricing));
+        const refusal = budgetRefusal(minRunCredits(unaffordable.pricing));
         if (refusal) throw new ModelChoiceError(CREDIT_REFUSAL_MESSAGES[refusal], 402, INSUFFICIENT_CREDITS_CODE);
       }
     }
     if (auto && withImages && !routed) {
       // A vision model Auto would pick but for its spend limit gets that limit's refusal.
-      const capped = autoRouteModel(configured, "vision", catalog.autoModelIds);
+      const capped = route(configured);
       if (capped) await refuseOverSpendLimit({ internalKey, userId, model: capped });
       throw new ModelChoiceError(AUTO_NO_VISION_MESSAGE, 400, "auto_no_vision_model");
     }
-    const model = routed || resolveCatalogModel(catalog, modelId);
+    const model = routed || resolveCatalogModel(auto ? { ...catalog, models: allowed } : catalog, modelId);
+    if (!model || (!promoKindOf(model.access) && !allowed.some((m) => m.id === model.id))) {
+      throw planModelUnavailable();
+    }
     if (!isPlatformConfigured(model.provider)) {
       throw new ModelChoiceError(AI_NOT_CONFIGURED_MESSAGE, 503, "ai_not_configured");
     }
@@ -267,13 +285,14 @@ export async function validateModelChoice({
     }
     // Usage is always recorded; the cap only applies once billing is live (#105).
     const refusal =
-      process.env.CREDIT_LIMITS_ENFORCED === "true" &&
-      creditRefusal(PLANS[account?.plan ?? "free"], account, Date.now(), minRunCredits(model.pricing));
+      enforce && budgetRefusal(minRunCredits(model.pricing));
     if (refusal) {
       throw new ModelChoiceError(CREDIT_REFUSAL_MESSAGES[refusal], 402, INSUFFICIENT_CREDITS_CODE);
     }
     return choice;
   }
+
+  assertPermission(await readPlatformPermission({ internalKey, userId }), true);
 
   // A malformed id fails Convex argument validation: same answer as a foreign one.
   const key = await convex
@@ -456,8 +475,8 @@ export interface RunModel {
  * invalid, no longer offers the model, or its custom endpoint no longer passes
  * the SSRF guard.
  * Call it in the function body, never inside `step.run`.
- * `workerModelIds`: a swarm task's run, on the first of them the route offers
- * (hidden catalog entries included), else on the run's model.
+ * `workerModelIds`: a swarm task's run, on the first permitted ordinary model,
+ * else on the permitted run/default model.
  */
 export async function resolveRunModel({
   internalKey,
@@ -468,15 +487,31 @@ export async function resolveRunModel({
   projectId: Id<"projects">;
   choice: AgentModelChoice;
 }, workerModelIds: readonly string[] = []): Promise<RunModel> {
+  const project = await convex.query(api.system.getProjectById, { internalKey, projectId });
+  if (!project || project.deletingAt) throw new ProviderKeyError("Project not found");
+  const view = await readPlatformPermission({ internalKey, userId: project.ownerId });
+  try { assertPermission(view, !!choice.keyId); }
+  catch (error) {
+    if (error instanceof ModelChoiceError) throw new ProviderKeyError(error.message);
+    throw error;
+  }
   if (!choice.keyId) {
     // Re-read, not taken from the event: the admin may have re-routed, hidden
     // or removed the model since the route checked it.
     const catalog = await platformCatalog(internalKey);
-    // A direct lookup: resolveCatalogModel drops hidden models, and the worker model may be a hidden utility.
-    // A promo entry needs the owner's claim; the run's own model needs none it doesn't already have.
-    const workerModel = workerModelIds.map((id) => catalog.models.find((m) => m.id === id))
+    const rollout = billingRolloutEnabled();
+    const allowed = allowedOrdinaryModels(catalog, view, { restrictFree: rollout });
+    // Preserve legacy hidden worker routes until rollout; promo still needs its own claim.
+    const workerCandidates = rollout ? allowed : catalog.models;
+    const workerModel = workerModelIds.map((id) => workerCandidates.find((m) => m.id === id))
       .find((m) => m && isPlatformConfigured(m.provider) && !promoKindOf(m.access));
-    const model = workerModel ?? resolveCatalogModel(catalog, choice.modelId);
+    const selected = resolveCatalogModel(catalog, choice.modelId);
+    const model = workerModel ?? (workerModelIds.length && !promoKindOf(selected.access)
+      ? resolveCatalogModel({ ...catalog, models: allowed }, choice.modelId) : selected);
+    if (!model || (!workerModel && !promoKindOf(model.access) && !allowed.some((m) => m.id === model.id))) {
+      throw new ProviderKeyError(planModelUnavailable().message);
+    }
+    // Spend admission is send-only (ADR 0012); replay keeps the admitted run's bounded overrun.
     // The key can go missing between the route's check and the run (a redeploy).
     if (!isPlatformConfigured(model.provider)) {
       throw new ProviderKeyError(AI_NOT_CONFIGURED_MESSAGE);

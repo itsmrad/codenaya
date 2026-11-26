@@ -1,5 +1,8 @@
 // Server consumers only. Read per request; never return this config to a client or log it.
 type Env = Readonly<Record<string, string | undefined>>;
+export const billingRolloutEnabled = (env: Env = process.env) =>
+  env.CODENAYA_BILLING_ENABLED === "true";
+
 export type DodoDeployment = "development" | "preview" | "staging" | "production";
 export type DodoEnvironment = "test_mode" | "live_mode";
 
@@ -106,7 +109,7 @@ export function readDodoConfig(
   if (consumer !== "next" && consumer !== "convex-receiver" && consumer !== "convex-reconciler") {
     throw new Error("Unknown billing configuration consumer.");
   }
-  if (consumer === "next" && env.CODENAYA_BILLING_ENABLED !== "true") return null;
+  if (consumer === "next" && !billingRolloutEnabled(env)) return null;
   const common: DodoCommonConfig = {
     environment: readEnvironment(env, deployment),
     businessId: required(env, "DODO_PAYMENTS_BUSINESS_ID"),

@@ -13,8 +13,8 @@ type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: stri
 const mocks = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), rows: [] as Row[] }));
 
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  const { withEnvPlatform, withPlatformPermission } = await import("@/features/ai-providers/server/active-platform.mock");
+  return { convex: { query: withEnvPlatform(mocks.query), mutation: withPlatformPermission(mocks.mutation) } };
 });
 
 import { drive, text, toolCall } from "./process-message.driver";

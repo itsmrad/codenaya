@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
+  permission: vi.fn(),
   query: vi.fn(),
   mutation: vi.fn(),
   platform: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   resolveEnv: vi.fn(),
 }));
 
+vi.mock("@/features/billing/server/platform-permission", () => ({ readPlatformPermission: mocks.permission }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
@@ -78,6 +80,8 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
   beforeEach(() => {
     vi.resetAllMocks();
     resetRateLimits();
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+    mocks.permission.mockResolvedValue({ plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60 });
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -98,6 +102,34 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    [{ platformAllowed: false, reason: "on_hold" }, 403, "billing_on_hold"],
+    [{ platformAllowed: false, reason: "deleted" }, 404, undefined],
+    [{ billingEnabled: true, creditsLeft: 0, dayLeft: null }, 402, "insufficient_credits"],
+  ])("refuses authoritative policy before dispatch: %j", async (view, status, code) => {
+    mocks.permission.mockResolvedValue({ plan: "free", platformAllowed: true, billingEnabled: false, ...view });
+    const res = await call();
+    expect(res.status).toBe(status);
+    if (code) expect(await res.json()).toMatchObject({ code });
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(mocks.permission).toHaveBeenCalledWith({ internalKey: "test-key", userId: "user_1" });
+  });
+
+  it("refuses a Free non-default before dispatch when billing rolls out", async () => {
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    const res = await call("Build a todo app", "x-ai/grok-4.7");
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "plan_model_unavailable" });
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the entitlement service is unavailable", async () => {
+    mocks.permission.mockRejectedValue(new Error("Policy unavailable"));
+    await expect(call()).rejects.toThrow("Policy unavailable");
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
   });
 
   it("dispatches the assistant placeholder", async () => {
@@ -295,6 +327,8 @@ describe("POST /api/messages with Auto (#322)", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+    mocks.permission.mockResolvedValue({ plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60 });
     resetRateLimits();
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
@@ -410,6 +444,8 @@ describe("POST /api/messages with Auto (#322)", () => {
 describe("cancelling processing messages while the backend is down", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+    mocks.permission.mockResolvedValue({ plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60 });
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -471,6 +507,8 @@ describe("POST /api/messages with a preview fix prompt", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+    mocks.permission.mockResolvedValue({ plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60 });
     resetRateLimits();
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");

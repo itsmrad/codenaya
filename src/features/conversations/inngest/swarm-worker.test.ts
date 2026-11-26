@@ -22,8 +22,8 @@ vi.mock("../swarm-sandbox", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog, mocks.account), mutation: mocks.mutation } };
+  const { withEnvPlatform, withPlatformPermission } = await import("@/features/ai-providers/server/active-platform.mock");
+  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog, mocks.account), mutation: withPlatformPermission(mocks.mutation, mocks.account) } };
 });
 
 import { TURN_HEARTBEAT_ID } from "../agent-steps";
@@ -75,10 +75,12 @@ const withUsage = (body: object) => ({ ...body, usage: { prompt_tokens: 1_000, c
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
+  vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   mocks.query.mockImplementation(async (ref) =>
-    ["system:getProjectFiles", "files:getBuildFiles"].includes(getFunctionName(ref)) ? [] : null);
+    getFunctionName(ref) === "system:getProjectById" ? { ownerId: "user_1" } :
+      ["system:getProjectFiles", "files:getBuildFiles"].includes(getFunctionName(ref)) ? [] : null);
   mocks.mutation.mockImplementation(async (ref, args) => MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
 });
 
@@ -150,7 +152,8 @@ describe("swarmWorker", () => {
       { _id: "types", name: "types.ts", type: "file", parentId: "src", content: contract },
       // An unrelated broken file must not send this worker back to repair it.
       { _id: "other", name: "other.ts", type: "file", parentId: "src", content: 'import "./missing";' },
-    ] : getFunctionName(ref) === "system:getProjectFiles" ? [] : null);
+    ] : getFunctionName(ref) === "system:getProjectById" ? { ownerId: "user_1" } :
+      getFunctionName(ref) === "system:getProjectFiles" ? [] : null);
   };
 
   it.each([true, false])("prompts once for a missing import and finishes even if still broken (repaired: %s)", async (repaired) => {
@@ -401,7 +404,6 @@ describe("swarmWorker", () => {
     expect(outcome.data).toMatchObject({ status: final ? "done" : "unfinished", summary: expect.stringContaining("ran out of credits") });
     if (final) expect(outcome.data).toMatchObject({ summary: expect.stringContaining("The real final answer.") });
     if (!final) expect(JSON.stringify(outcome.inferenceBodies.at(-1))).toContain("ran out of credits");
-    expect(mocks.account).toHaveBeenCalledTimes(1);
     expect(mocks.selfCheckWorker.mock.calls[0][0].signal.aborted).toBe(true);
   });
 
