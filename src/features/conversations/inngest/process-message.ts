@@ -1,3 +1,4 @@
+import { type PermissionGate, PERMISSION_STOP_REPLY, InferencePermissionMiddleware } from "@/features/billing/server/platform-permission";
 import { createAgent, createNetwork, type Tool } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
@@ -51,7 +52,7 @@ import {
   RUN_IMAGES_REFUSED_MESSAGE,
   isProviderKeyRejection,
   keyFailureMessage,
-  resolveRunModel,
+  resolveInferenceRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
 import { forceToolCall, withoutToolCalls, withPromptCache } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
@@ -149,6 +150,7 @@ const modelReasoning = (raw?: string): string => {
 export const processMessage = inngest.createFunction(
   {
     id: "process-message",
+    middleware: [InferencePermissionMiddleware],
     // At most two agent runs per user at once; more wait in the queue (#242).
     // One per project already holds: a new message cancels the running one.
     concurrency: [{ key: "event.data.ownerId", limit: 2 }],
@@ -211,13 +213,17 @@ export const processMessage = inngest.createFunction(
     // the decrypted key, and Inngest persists step results. A key that cannot be
     // used ends the run with a pointer to settings; there is no fallback to the
     // platform key.
+    const storedMessage = await step.run("get-run-model", () => convex.query(api.system.getMessageById, { internalKey, messageId }));
+    if (storedMessage && storedMessage.projectId !== projectId) throw new NonRetriableError("Message does not belong to this project");
+    const storedChoice = storedMessage?.runModel;
     let runModel: RunModel;
+    let permission: PermissionGate;
     try {
-      runModel = await resolveRunModel({
+      ({ model: runModel, permission } = await resolveInferenceRunModel({
         internalKey,
         projectId,
-        choice: model && typeof model === "object" ? model : { modelId: model ?? "" },
-      });
+        choice: storedChoice ?? (model && typeof model === "object" ? model : { modelId: model ?? "" }),
+      }));
     } catch (error) {
       if (!(error instanceof ProviderKeyError)) {
         throw error;
@@ -726,7 +732,8 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,
-    ].map(swarm.guard).map(refuseCutOffCalls).map(decodeJsonArgs);
+    ].map((tool) => ({ ...tool, handler: (input: Parameters<Tool.Any["handler"]>[0], options: Parameters<Tool.Any["handler"]>[1]) => permission.stopped
+      ? Promise.resolve(PERMISSION_STOP_REPLY) : tool.handler(input, options) })).map(swarm.guard).map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -904,25 +911,26 @@ export const processMessage = inngest.createFunction(
         },
       },
     };
-    const codingAgent = createAgent(agentOptions);
+    const codingAgent = permission.wrap(createAgent(agentOptions), runModel.codingModel.id);
     // The run's last step: the same agent with tools off, so it ends with a summary.
-    const summaryAgent = createAgent({
+    const summaryAgent = permission.wrap(createAgent({
       ...agentOptions,
       name: SUMMARY_AGENT_NAME,
       model: withoutToolCalls(codingModel),
-    });
+    }), runModel.codingModel.id);
     // Swarm mode's forced turn: the same agent, made to call delegateTasks.
-    const delegateAgent = swarm.catchDelegation(createAgent({
+    const delegateAgent = swarm.catchDelegation(permission.wrap(createAgent({
       ...agentOptions,
       name: SWARM_DELEGATE_AGENT_NAME,
       model: forceToolCall(codingModel, "delegateTasks"),
-    }));
+    }), runModel.codingModel.id));
 
     const network = createNetwork({
       name: "codenaya-network",
       agents: [codingAgent, summaryAgent, delegateAgent],
       maxIter: MAX_AGENT_STEPS,
       router: ({ network, callCount }) => {
+        if (permission.stopped) return undefined;
         const { results } = network.state;
         const lastResult = results.at(-1);
         const hasTextResponse = lastResult?.output.some(
@@ -978,6 +986,7 @@ export const processMessage = inngest.createFunction(
         ? generateConversationTitle({
             step,
             runModel,
+            permission,
             request,
             recordUsage: (raw) => {
               titleUsageRecorded = true;
@@ -1005,7 +1014,11 @@ export const processMessage = inngest.createFunction(
       );
     } catch (error) {
       await settleRun("record-usage-on-error");
-      return await endRunOnKeyRejection(error);
+      if (!permission.stopped) return await endRunOnKeyRejection(error);
+      await step.run("permission-stopped", () => convex.mutation(api.system.updateMessageContent, {
+        internalKey, messageId, content: PERMISSION_STOP_REPLY, outcome: "error",
+      }));
+      return { success: false, messageId, conversationId };
     }
 
     // Extract the assistant's text response from the last agent result
@@ -1027,7 +1040,7 @@ export const processMessage = inngest.createFunction(
     // Changes that ended on a failed or missing check get a repair here, before
     // the run completes, so it needs no open tab. Its model calls are metered
     // like the run's; cancelling the run stops it between steps.
-    const repairNeeded = !stuck && needsBuildRepair(result.state.results);
+    const repairNeeded = !permission.stopped && !stuck && needsBuildRepair(result.state.results);
     if (repairNeeded && outOfCredits()) creditStopped = true;
     const repairBudget = new AbortController();
     // The repair sees only the errors and the files they name, not the chat,
@@ -1042,6 +1055,10 @@ export const processMessage = inngest.createFunction(
           projectId,
           internalKey,
           runId,
+          permission,
+          modelId: cheapRepair ? (runModel.titleModelId ?? runModel.codingModel.id) : runModel.codingModel.id,
+          fallbackModelId: runModel.codingModel.id,
+          purpose: cheapRepair ? "utility" : "coding",
           ...(cheapRepair ? { model: cheapRepair, fallbackModel: codingModel } : { model: codingModel }),
           step: (id, fn) => step.run(id, fn),
           signal: repairBudget.signal,
@@ -1071,7 +1088,7 @@ export const processMessage = inngest.createFunction(
     // client sees the flag cleared by the time the run is no longer active.
     // The run that ends it gets the one-time publish / export card (#341).
     const firstBuild =
-      verified &&
+      !permission.stopped && verified &&
       wroteFiles(result.state.results) &&
       (await step.run("complete-first-build", () =>
         convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId }),
@@ -1084,16 +1101,16 @@ export const processMessage = inngest.createFunction(
     const content = creditStopped || outOfCredits()
       ? [modelReply, OUT_OF_CREDITS_REPLY].filter(Boolean).join("\n\n")
       : modelReply;
-    const reply = content || DEFAULT_REPLY_MESSAGE;
+    const reply = permission.stopped ? PERMISSION_STOP_REPLY : content || DEFAULT_REPLY_MESSAGE;
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
       await convex.mutation(api.system.updateMessageContent, {
         internalKey,
         messageId,
-        content: buildNote && !stuck ? `${reply}\n\n${buildNote}` : reply,
-        ...(stuck ? { stuck } : verified || creditStopped ? {} : { outcome: "error" as const }),
-        ...(suggestions.length ? { suggestions } : {}),
+        content: buildNote && !stuck && !permission.stopped ? `${reply}\n\n${buildNote}` : reply,
+        ...(stuck ? { stuck } : !permission.stopped && (verified || creditStopped) ? {} : { outcome: "error" as const }),
+        ...(!permission.stopped && suggestions.length ? { suggestions } : {}),
         ...(firstBuild ? { firstBuild: true } : {}),
       })
     });

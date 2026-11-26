@@ -13,7 +13,7 @@ import {
 import { MODEL_LIMIT_CODE, spendRefusal, spendRefusalMessage } from "@/features/billing/model-spend";
 import { allowedOrdinaryModels } from "@/features/billing/model-access";
 import { billingRolloutEnabled } from "@/features/billing/server/dodo-config";
-import { readPlatformPermission } from "@/features/billing/server/platform-permission";
+import { permissionGate, readPlatformPermission } from "@/features/billing/server/platform-permission";
 import type { EntitlementView } from "@/features/billing/entitlement";
 import { PLANS } from "@/features/billing/plans";
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
@@ -447,6 +447,7 @@ export interface RunModel {
   codingModel: { id: string; label: string };
   /** The conversation title model, on the same provider. */
   title: (temperature?: number) => AgentKitModel;
+  titleModelId?: string;
   /**
    * Whether this run may send images: the model reads them, as resolved now,
    * and is the model the send picked. A substitute (the default, run when the
@@ -478,7 +479,7 @@ export interface RunModel {
  * `workerModelIds`: a swarm task's run, on the first permitted ordinary model,
  * else on the permitted run/default model.
  */
-export async function resolveRunModel({
+async function rebuildRunModel({
   internalKey,
   projectId,
   choice,
@@ -486,11 +487,11 @@ export async function resolveRunModel({
   internalKey: string;
   projectId: Id<"projects">;
   choice: AgentModelChoice;
-}, workerModelIds: readonly string[] = []): Promise<RunModel> {
+}, workerModelIds: readonly string[] = [], guardedInference = false): Promise<RunModel> {
   const project = await convex.query(api.system.getProjectById, { internalKey, projectId });
-  if (!project || project.deletingAt) throw new ProviderKeyError("Project not found");
-  const view = await readPlatformPermission({ internalKey, userId: project.ownerId });
-  try { assertPermission(view, !!choice.keyId); }
+  if (!project || (!guardedInference && project.deletingAt)) throw new ProviderKeyError("Project not found");
+  const view = guardedInference ? null : await readPlatformPermission({ internalKey, userId: project.ownerId });
+  try { if (view) assertPermission(view, !!choice.keyId); }
   catch (error) {
     if (error instanceof ModelChoiceError) throw new ProviderKeyError(error.message);
     throw error;
@@ -500,13 +501,13 @@ export async function resolveRunModel({
     // or removed the model since the route checked it.
     const catalog = await platformCatalog(internalKey);
     const rollout = billingRolloutEnabled();
-    const allowed = allowedOrdinaryModels(catalog, view, { restrictFree: rollout });
+    const allowed = guardedInference ? catalog.models : allowedOrdinaryModels(catalog, view!, { restrictFree: rollout });
     // Preserve legacy hidden worker routes until rollout; promo still needs its own claim.
     const workerCandidates = rollout ? allowed : catalog.models;
     const workerModel = workerModelIds.map((id) => workerCandidates.find((m) => m.id === id))
       .find((m) => m && isPlatformConfigured(m.provider) && !promoKindOf(m.access));
     const selected = resolveCatalogModel(catalog, choice.modelId);
-    const model = workerModel ?? (workerModelIds.length && !promoKindOf(selected.access)
+    const model = guardedInference ? (catalog.models.find((m) => m.id === choice.modelId) ?? selected) : workerModel ?? (workerModelIds.length && !promoKindOf(selected.access)
       ? resolveCatalogModel({ ...catalog, models: allowed }, choice.modelId) : selected);
     if (!model || (!workerModel && !promoKindOf(model.access) && !allowed.some((m) => m.id === model.id))) {
       throw new ProviderKeyError(planModelUnavailable().message);
@@ -519,7 +520,7 @@ export async function resolveRunModel({
     // The send took the run and checked the end date; the run re-checks only
     // the claim, so a run queued just before the end still goes ahead.
     if (
-      promoKindOf(model.access) &&
+      !guardedInference && promoKindOf(model.access) &&
       !(await convex.query(api.promoClaims.hasClaimForProjectOwner, { internalKey, projectId }))
     ) {
       throw new ProviderKeyError(PROMO_REFUSAL_MESSAGES.not_claimed);
@@ -532,6 +533,7 @@ export async function resolveRunModel({
       coding: (temperature) => platformAgentModel(model.provider, model.providerModelId, temperature),
       codingModel: { id: model.id, label: platformRunLabel(model) },
       title: (temperature) => platformAgentModel(title.provider, title.providerModelId, temperature),
+      titleModelId: title.id,
       acceptsImages: model.vision && model.id === choice.modelId,
       metering: {
         source: promoKindOf(model.access) ? "promo" : "platform",
@@ -595,6 +597,7 @@ export async function resolveRunModel({
     coding: (temperature) => build(codingModelId, temperature),
     codingModel: { id: codingModelId, label: runModelLabel(codingModelId, key) },
     title: (temperature) => build(titleModel, temperature),
+    titleModelId: titleModel,
     acceptsImages: modelAcceptsImages(choice.modelId, key),
     metering: { source: "byok" },
     // Only a definite refusal counts: an unreachable provider is left for the
@@ -608,6 +611,17 @@ export async function resolveRunModel({
       return { rejected: await isOutOfCredit({ ...credential, model: choice.modelId }) };
     },
   };
+}
+
+/** Non-workflow callers retain run-start permission checks. */
+export const resolveRunModel = (args: Parameters<typeof rebuildRunModel>[0], workers: readonly string[] = []) =>
+  rebuildRunModel(args, workers);
+
+/** Only guarded AgentKit workflows: reconstruct memoized usage before refusing new inference. */
+export async function resolveInferenceRunModel(args: Parameters<typeof rebuildRunModel>[0] & { role?: "worker" | "sub-orchestrator" }) {
+  const model = await rebuildRunModel(args, [], true);
+  const permission = permissionGate({ internalKey: args.internalKey, projectId: args.projectId, source: model.metering.source, legacyWorker: args.role !== undefined });
+  return { model, permission };
 }
 
 /**

@@ -185,10 +185,12 @@ export const repairBuild = async ({
   step,
   recordSteps,
   fallbackModel,
+  fallbackModelId,
   ...options
-}: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId" | "messageId" | "model" | "onResponse" | "signal"> & {
+}: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId" | "messageId" | "model" | "onResponse" | "signal" | "permission" | "modelId" | "purpose"> & {
   /** Takes over once the repairs on `model` (a cheap one) fail or change nothing. */
   fallbackModel?: VerifyAndFixOptions["model"];
+  fallbackModelId?: string;
   step: NonNullable<VerifyAndFixOptions["step"]>;
   /** Upserts the rows `build` returns into the run block, in a step. */
   recordSteps: (build: () => AgentStep[]) => Promise<void>;
@@ -234,7 +236,7 @@ export const repairBuild = async ({
     // `provision` writes project files only, never variables or secret files: no value to print.
     secrets: [],
     ...(fallbackModel
-      ? { fallback: { model: fallbackModel, after: MAX_SERVER_REPAIRS }, maxAttempts: MAX_SERVER_REPAIRS + 1 }
+      ? { fallback: { model: fallbackModel, modelId: fallbackModelId, after: MAX_SERVER_REPAIRS }, maxAttempts: MAX_SERVER_REPAIRS + 1 }
       : { maxAttempts: MAX_SERVER_REPAIRS }),
     step,
     onEvent: (event) => recordSteps(() => repairSteps(event)),

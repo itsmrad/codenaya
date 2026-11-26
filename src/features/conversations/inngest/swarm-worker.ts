@@ -1,3 +1,4 @@
+import { PERMISSION_STOP_REPLY, InferencePermissionMiddleware } from "@/features/billing/server/platform-permission";
 import { createAgent, createNetwork } from "@inngest/agent-kit";
 import { NonRetriableError } from "inngest";
 
@@ -6,7 +7,7 @@ import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { INNGEST_PLAN_CONCURRENCY_LIMIT, inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
 import { getAppError } from "@/lib/convex-error";
-import { resolveWorkerModel } from "@/features/ai-providers/server/resolve-run-model";
+import { resolveInferenceRunModel } from "@/features/ai-providers/server/resolve-run-model";
 import { withoutToolCalls, withPromptCache } from "@/features/ai-providers/server/agentkit-model";
 import { costUsd, creditsForCost, usageOfResponse } from "@/features/billing/credits";
 import { api } from "../../../../convex/_generated/api";
@@ -77,6 +78,7 @@ const lastHeartbeat = new Map<string, number>();
 export const swarmWorker = inngest.createFunction(
   {
     id: "swarm-worker",
+    middleware: [InferencePermissionMiddleware],
     // Room for every agent of processMessage's 2 runs per owner: step.invoke's timeout counts queue time.
     // The limit counts executing steps, and a sub-orchestrator waiting on step.invoke holds none.
     // shortcut: capped at the plan limit, so extra workers queue; raise it with the Inngest plan.
@@ -119,7 +121,7 @@ export const swarmWorker = inngest.createFunction(
     if (!task) return { status: "error", summary: "The task no longer exists.", writtenPaths: [] };
 
     // Model closures can hold decrypted BYOK keys: resolve in the body, never in a step.
-    const runModel = await resolveWorkerModel({ internalKey, projectId, choice: model, role: task.role });
+    const { model: runModel, permission } = await resolveInferenceRunModel({ internalKey, projectId, choice: { ...model, modelId: task.modelId }, role: task.role ?? "worker" });
     // shortcut: each worker snapshots the full balance, so a swarm can overshoot ~9x; add shared reservations to bound aggregate spend.
     const creditLimit = await step.run("get-worker-credit-limit", () =>
       runCreditLimit(internalKey, projectId, runModel.metering.source));
@@ -276,14 +278,15 @@ export const swarmWorker = inngest.createFunction(
         },
       },
     };
-    const worker = createAgent(agentOptions);
+    const worker = permission.wrap(createAgent(agentOptions), runModel.codingModel.id);
     // Same tools so the history's tool calls stay valid; the model is barred from calling them.
-    const summaryAgent = createAgent({ ...agentOptions, name: SUMMARY_AGENT_NAME, model: withoutToolCalls(codingModel) });
+    const summaryAgent = permission.wrap(createAgent({ ...agentOptions, name: SUMMARY_AGENT_NAME, model: withoutToolCalls(codingModel) }), runModel.codingModel.id);
     const network = createNetwork({
       name: "swarm-worker-network",
       agents: [worker, summaryAgent],
       maxIter: maxSteps,
       router: ({ network, callCount }) => {
+        if (permission.stopped) return undefined;
         const last = network.state.results.at(-1);
         if (last?.agentName === SUMMARY_AGENT_NAME) return undefined;
         const hasCalls = last?.output.some((m) => m.type === "tool_call");
@@ -304,20 +307,24 @@ export const swarmWorker = inngest.createFunction(
       },
     });
 
-    const result = await network.run(task.brief);
-    const raw = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
+    const result = await network.run(task.brief).catch((error: unknown) => {
+      if (!permission.stopped) throw error;
+      return undefined;
+    });
+    const raw = result?.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
       ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n").trim() ?? "";
     // The shared prompt asks for follow-up chips (#256); a worker's are never shown.
     let reply = splitSuggestions(raw).content || "The worker finished without a summary.";
     if (repairNeeds && !/^NEEDS:/m.test(reply)) reply += `\n${repairNeeds}`;
     const repairBudget = new AbortController();
-    if (usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
+    if (permission.stopped || usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
     let repairTurn = 0;
     const check = await selfCheckWorker({
       step, internalKey, projectId, messageId: parentMessageId, agentTaskId, ownedPaths: task.ownedPaths,
       // step.invoke's timeout runs from this event; read only inside a memoized step.
       invokedAt: event.ts ?? Date.now(),
       timeoutMs: depth >= MAX_SWARM_DEPTH ? CHILD_WORKER_TIMEOUT_MS : subOrchestrator ? SUBORCH_TIMEOUT_MS : WORKER_TIMEOUT_MS,
+      permission, modelId: runModel.codingModel.id,
       model: codingModel, onEvent: (event) => recordSteps("worker-self-check", [selfCheckStep(event, Date.now())]),
       signal: repairBudget.signal,
       onResponse: async (raw) => {
@@ -326,18 +333,18 @@ export const swarmWorker = inngest.createFunction(
           creditStopped = true;
           unfinished = true;
         }
-        if (usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
+        if (permission.stopped || usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
       },
     });
     // Stored as done: what it wrote is real; the orchestrator reads the prefix.
-    const summary = creditStopped ? `${OUT_OF_CREDITS_REPLY}\n\n${reply}` : unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
+    const summary = permission.stopped ? PERMISSION_STOP_REPLY : creditStopped ? `${OUT_OF_CREDITS_REPLY}\n\n${reply}` : unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
     lastHeartbeat.delete(agentTaskId);
     await step.run("finish-worker", () => convex.mutation(api.agentTasks.finishTask, {
       internalKey, agentTaskId, status: "done", summary, selfCheck: check?.selfCheck,
     }));
     const writtenPaths = [...new Set([...childWrites, ...runWrittenPaths([...recorded.values()]), ...(check?.filesChanged ?? [])])];
     return {
-      status: unfinished ? "unfinished" : "done", summary, writtenPaths, ...(check ? { selfCheck: check.selfCheck } : {}),
+      status: permission.stopped || unfinished ? "unfinished" : "done", summary, writtenPaths, ...(check ? { selfCheck: check.selfCheck } : {}),
     };
   },
 );

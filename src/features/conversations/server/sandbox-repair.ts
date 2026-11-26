@@ -1,3 +1,4 @@
+import type { PermissionGate } from "@/features/billing/server/platform-permission";
 import { type Tool, createAgent, createNetwork } from "@inngest/agent-kit";
 
 import {
@@ -127,6 +128,9 @@ type CheckOutcome = {
 type Model = NonNullable<Parameters<typeof createAgent>[0]["model"]>;
 
 export type VerifyAndFixOptions = {
+  permission?: PermissionGate;
+  modelId?: string;
+  purpose?: "coding" | "utility";
   /**
    * Caller-owned and left running. A function is called only inside a verify
    * or sync, so replays of memoized steps never connect to it.
@@ -149,7 +153,7 @@ export type VerifyAndFixOptions = {
    * `after` repairs on `model` have run, or one changed nothing or threw, the
    * remaining repairs use `fallback.model`.
    */
-  fallback?: { model: Model; after: number };
+  fallback?: { model: Model; after: number; modelId?: string };
   /** Repairs, 0 (check only) to MAX_REPAIR_ATTEMPTS; anything else is clamped, and NaN means the maximum. */
   maxAttempts?: number;
   /** Each check finishes by this time (epoch ms), so it cannot outlive the caller's own timeout. */
@@ -385,12 +389,15 @@ export const repairTools = ({
  * `allowedPaths` are refused whole, as SWARM's own guard does.
  */
 const repair = async ({
-  projectId, internalKey, messageId, model, name, errors, paths, framework, sources = [], signal, allowedPaths, onResponse, written,
+  projectId, internalKey, messageId, model, name, errors, paths, framework, sources = [], signal, allowedPaths, onResponse, written, permission, modelId, purpose,
 }: {
   projectId: Id<"projects">;
   internalKey: string;
   messageId?: Id<"messages">;
   model: Model;
+  permission?: PermissionGate;
+  modelId?: string;
+  purpose?: "coding" | "utility";
   name: string;
   errors: BuildError[];
   paths: string[];
@@ -414,6 +421,7 @@ const repair = async ({
       },
     },
   });
+  if (permission) permission.wrap(agent, modelId ?? "", purpose ?? "utility");
   const network = createNetwork({
     name,
     agents: [agent],
@@ -422,7 +430,7 @@ const repair = async ({
     // Until a reply with no tool calls, or the caller cancels.
     router: ({ network: { state } }) => {
       const last = state.results.at(-1);
-      if (signal?.aborted) return undefined;
+      if (permission?.stopped || signal?.aborted) return undefined;
       return !last || last.output.some((message) => message.type === "tool_call") ? agent : undefined;
     },
   });
@@ -486,6 +494,7 @@ export const verifyAndFix = async ({
   messageId,
   agentTaskId = "main",
   model,
+  permission, modelId, purpose,
   fallback,
   maxAttempts = MAX_REPAIR_ATTEMPTS,
   deadline,
@@ -527,7 +536,7 @@ export const verifyAndFix = async ({
   // sandbox is as checked, so the fallback gets the same errors unchecked.
   let checked: CheckOutcome | undefined;
   for (let attempt = 1; ; attempt++) {
-    if (signal?.aborted) return result("unverified", "Cancelled");
+    if (permission?.stopped || signal?.aborted) return result("unverified", "Cancelled");
     let outcome = checked;
     checked = undefined;
     if (!outcome) {
@@ -551,7 +560,7 @@ export const verifyAndFix = async ({
     }
     const owned = filterErrors ? filterErrors(errors) : errors;
     if (attempts >= cap) return result("failed", `Build still fails after ${attempts} repair attempt(s)`);
-    if (signal?.aborted) return result("unverified", "Cancelled");
+    if (permission?.stopped || signal?.aborted) return result("unverified", "Cancelled");
 
     const escalation = fallback && (escalated || attempts >= fallback.after) ? fallback : undefined;
     const onFallback = escalation !== undefined;
@@ -565,7 +574,7 @@ export const verifyAndFix = async ({
     let crashed: string | undefined;
     try {
       written = await repair({
-        projectId, internalKey, messageId, model: escalation?.model ?? model, name: `${prefix}:repair:${attempt}`,
+        projectId, internalKey, messageId, permission, modelId: escalation?.modelId ?? modelId, purpose: escalation ? "coding" : purpose, model: escalation?.model ?? model, name: `${prefix}:repair:${attempt}`,
         errors: owned, paths: outcome.paths, framework: outcome.framework, sources: outcome.sources,
         signal, allowedPaths: (path) => path !== ROUTE_TREE && (allowedPaths?.(path) ?? true), onResponse: onResponse && ((raw) => onResponse(raw, onFallback)), written: wrote,
       });
@@ -580,6 +589,7 @@ export const verifyAndFix = async ({
       written = [...new Set(wrote)];
       crashed = reason;
     }
+    if (permission?.stopped) return result("unverified", "Access changed");
     let changed: string[];
     try {
       changed = written.length
