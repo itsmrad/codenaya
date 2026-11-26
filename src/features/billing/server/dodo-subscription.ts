@@ -100,6 +100,7 @@ export async function createDodoPortal(
     // Provider errors may contain credentials or the bearer session URL.
     return null;
   } finally {
+    controller.abort();
     clearTimeout(timer);
   }
 }

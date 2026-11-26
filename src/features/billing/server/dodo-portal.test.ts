@@ -70,13 +70,21 @@ it.each([{}, { link: 5 }, null, [], { url: link }])("refuses malformed response 
   DODO_PORTAL_HOSTS.test_mode = ["portal.test.invalid"];
   expect(await createDodoPortal(config, "cus_alice", vi.fn().mockResolvedValue(Response.json(body)))).toBeNull();
 });
-it("bounds declared/streamed bytes, malformed JSON and provider exceptions", async () => {
+it("bounds streamed bytes, malformed JSON and provider exceptions", async () => {
   DODO_PORTAL_HOSTS.test_mode = ["portal.test.invalid"];
-  for (const response of [new Response("{bad"), new Response("x".repeat(MAX_PROVIDER_BODY_BYTES + 1)),
-    new Response("{}", { headers: { "content-length": String(MAX_PROVIDER_BODY_BYTES + 1) } })]) {
+  for (const response of [new Response("{bad"), new Response("x".repeat(MAX_PROVIDER_BODY_BYTES + 1))]) {
     expect(await createDodoPortal(config, "cus_alice", vi.fn().mockResolvedValue(response))).toBeNull();
   }
   expect(await createDodoPortal(config, "cus_alice", vi.fn().mockRejectedValue(new Error(link + config.apiKey)))).toBeNull();
+});
+it("aborts the request when the declared response is too large", async () => {
+  DODO_PORTAL_HOSTS.test_mode = ["portal.test.invalid"];
+  const response = new Response("{}", { headers: { "content-length": String(MAX_PROVIDER_BODY_BYTES + 1) } });
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response);
+
+  expect(await createDodoPortal(config, "cus_alice", fetchImpl)).toBeNull();
+  expect(fetchImpl.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  expect(response.bodyUsed).toBe(false);
 });
 it("aborts on timeout with a sanitized failure", async () => {
   vi.useFakeTimers();
