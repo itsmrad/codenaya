@@ -327,6 +327,8 @@ describe("POST /api/messages with Auto (#322)", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+    mocks.permission.mockResolvedValue({ plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60 });
     resetRateLimits();
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
@@ -442,6 +444,8 @@ describe("POST /api/messages with Auto (#322)", () => {
 describe("cancelling processing messages while the backend is down", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+    mocks.permission.mockResolvedValue({ plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60 });
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -503,6 +507,8 @@ describe("POST /api/messages with a preview fix prompt", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+    mocks.permission.mockResolvedValue({ plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60 });
     resetRateLimits();
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
