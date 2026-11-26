@@ -56,6 +56,18 @@ describe("usageView", () => {
     expect(usageView({ ...account, dayUsed: 60 }, usedUp.dayResetsAt).day).toMatchObject({ left: 60, percentLeft: 100 });
   });
 
+  test("a daily reset leaves an exhausted month empty until the UTC year boundary", () => {
+    const used = { ...account, periodStartsAt: Date.UTC(2026, 11, 1), periodUsed: 300,
+      dayStartsAt: Date.UTC(2026, 11, 30), dayUsed: 60 };
+    expect(usageView(used, Date.UTC(2026, 11, 31))).toMatchObject({
+      day: { left: 60 }, month: { left: 0 }, isLow: true,
+    });
+    expect(usageView(used, Date.UTC(2027, 0, 1))).toMatchObject({
+      day: { left: 60 }, month: { left: 300 }, isLow: false,
+      dayResetsAt: Date.UTC(2027, 0, 2), monthResetsAt: Date.UTC(2027, 1, 1),
+    });
+  });
+
   test("a plan without a daily cap has no day bar", () => {
     expect(usageView({ ...account, plan: "pro" }, NOV_15)).toMatchObject({ day: null, month: { left: 1_900 } });
   });

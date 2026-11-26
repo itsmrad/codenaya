@@ -706,6 +706,60 @@ describe("validateModelChoice: credits (ADR 0011)", () => {
   });
 });
 
+describe("Free UTC reset admission across platform routes", () => {
+  const day = Date.UTC(2026, 10, 26);
+  const month = Date.UTC(2026, 10, 1);
+  const tomorrow = day + 24 * 60 * 60 * 1000;
+  const nextMonth = Date.UTC(2026, 11, 1);
+  const stored = { plan: "free", periodStartsAt: month, periodUsed: 120, dayStartsAt: day, dayUsed: 60 };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+    for (const key of ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY"]) {
+      vi.stubEnv(key, "test-platform-key");
+    }
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it.each(["openrouter", "openai", "anthropic", "groq"])(
+    "%s refuses spent day, admits at reset, and refuses the new spent day on every fallback",
+    async (provider) => {
+      mocks.platform.mockReturnValue({
+        models: [catalogModel("default", "Default", { provider }), catalogModel("hidden", "Hidden", { provider, hidden: true })],
+        defaultModelId: "default", utilityModelId: "default", autoModelIds: ["default"],
+      });
+      for (const model of ["default", "auto", "hidden", "removed", undefined]) {
+        mocks.account.mockReturnValue(stored);
+        vi.setSystemTime(tomorrow - 1);
+        await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model }))
+          .rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+        // The query may return the exact same stored row after UTC midnight.
+        vi.setSystemTime(tomorrow);
+        expect(await validateModelChoice({ internalKey: "ik", userId: "user_1", model }))
+          .toMatchObject({ modelId: "default" });
+        mocks.account.mockReturnValue({ ...stored, periodUsed: 180, dayStartsAt: tomorrow });
+        await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model }))
+          .rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+      }
+    },
+  );
+
+  it.each(["default", "auto", "removed"])("%s keeps monthly exhaustion through a day reset and admits at month reset", async (model) => {
+    mocks.platform.mockReturnValue({ models: [catalogModel("default", "Default")], defaultModelId: "default", utilityModelId: "default" });
+    mocks.account.mockReturnValue({ ...stored, periodUsed: 300 });
+    vi.setSystemTime(tomorrow);
+    await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model }))
+      .rejects.toMatchObject({ status: 402, message: expect.stringContaining("this month's") });
+    vi.setSystemTime(nextMonth - 1);
+    await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model }))
+      .rejects.toMatchObject({ status: 402 });
+    vi.setSystemTime(nextMonth);
+    expect(await validateModelChoice({ internalKey: "ik", userId: "user_1", model })).toMatchObject({ modelId: "default" });
+  });
+});
+
 describe("takePromoRun (send routes, ADR 0009)", () => {
   const take = (promoKind?: "opus" | "sonnet") =>
     takePromoRun({ internalKey: "ik", userId: "user_1", promoKind });
