@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
+  permission: vi.fn(),
+  project: vi.fn(),
   mutation: vi.fn(),
   platform: vi.fn(),
   account: vi.fn(),
@@ -13,12 +15,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
   return {
-    convex: { query: withEnvPlatform(mocks.query, mocks.platform, mocks.account), mutation: mocks.mutation },
+    convex: { query: (ref: Parameters<typeof getFunctionName>[0], args: unknown) =>
+      getFunctionName(ref) === "system:getProjectById" ? mocks.project(args) :
+        withEnvPlatform(mocks.query, mocks.platform, mocks.account)(ref, args), mutation: mocks.mutation },
   };
 });
+vi.mock("@/features/billing/server/platform-permission", () => ({ readPlatformPermission: mocks.permission }));
 vi.mock("./sealed-key", () => ({ openProviderKey: mocks.openProviderKey }));
 vi.mock("node:dns/promises", () => ({ lookup: mocks.lookup }));
 
+import { accountAvailability } from "@/features/billing/entitlement";
 import { DEFAULT_AGENT_MODEL_ID } from "@/features/conversations/agent-models";
 import { AUTO_NO_VISION_MESSAGE } from "@/features/ai-providers/auto-route";
 import { PROMO_ENDS_AT, PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
@@ -131,6 +137,12 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("NEXT_PUBLIC_AI_PROVIDER", "");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
+  vi.stubEnv("CODENAYA_BILLING_ENABLED", "");
+  mocks.project.mockResolvedValue({ ownerId: "real_owner" });
+  mocks.permission.mockImplementation(async () => accountAvailability({
+    account: mocks.account() ?? null, enabled: false, periodLots: [], activeLots: [],
+    debt: 0, held: false, deleted: false,
+  }, Date.now()));
   mocks.openProviderKey.mockResolvedValue(SECRET);
   mocks.lookup.mockResolvedValue([{ address: "104.18.32.7", family: 4 }]);
 });
@@ -1074,7 +1086,7 @@ describe("resolveWorkerModel (swarm worker)", () => {
   const resolve = (choice: { keyId?: string; modelId: string }) =>
     resolveWorkerModel({ internalKey: "ik", projectId: "p1" as never, choice });
 
-  it("runs platform workers on Haiku, even a hidden utility entry, at its price", async () => {
+  it("does not let a worker use a hidden utility as a coding model", async () => {
     mocks.platform.mockReturnValue({
       ...ROUTED_SAVED,
       models: [
@@ -1086,9 +1098,9 @@ describe("resolveWorkerModel (swarm worker)", () => {
       ],
     });
     const run = await resolve({ modelId: "x-ai/grok-4.7" });
-    expect(target(run.coding(0.3))).toMatchObject({ id: "anthropic/claude-haiku-5.5", authKey: "sk-or-platform" });
-    expect(run.metering.coding).toEqual({ mode: "blended", usdPerMTok: 2 });
-    expect(run.codingModel.id).toBe("anthropic/claude-haiku-5.5");
+    expect(target(run.coding(0.3))).toMatchObject({ id: "x-ai/grok-4.7", authKey: "sk-or-platform" });
+    expect(run.metering.coding).toEqual({ mode: "blended", usdPerMTok: 1 });
+    expect(run.codingModel.id).toBe("x-ai/grok-4.7");
   });
 
   it("runs on the run's model when the catalog has no Haiku", async () => {
@@ -1121,9 +1133,124 @@ describe("resolveWorkerModel (swarm worker)", () => {
         catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { hidden: true }),
       ],
     });
-    expect(target((await resolveSub({ modelId: "x-ai/grok-4.7" })).coding()).id).toBe("anthropic/claude-sonnet-5.5");
+    expect(target((await resolveSub({ modelId: "x-ai/grok-4.7" })).coding()).id).toBe("x-ai/grok-4.7");
 
     mocks.query.mockResolvedValue({ ...openAiKey, provider: "anthropic" });
     expect(target((await resolveSub({ keyId: "key_1", modelId: "claude-opus-5-5" })).coding()).id).toBe("claude-sonnet-5-5");
+  });
+});
+
+
+describe("stage 11c authoritative access", () => {
+  const validate = (model: string, withImages = false) =>
+    validateModelChoice({ internalKey: "ik", userId: "user_1", model, withImages });
+  const resolve = (modelId: string) => resolveRunModel({ internalKey: "ik", projectId: "p1" as never, choice: { modelId } });
+  const policy = (extra: Record<string, unknown>) => mocks.permission.mockResolvedValue({
+    plan: "free", billingEnabled: false, platformAllowed: true, reason: null, creditsLeft: 60, ...extra,
+  });
+  beforeEach(() => {
+    mocks.platform.mockReturnValue({ ...OPUS_FOR_EVERYONE, autoModelIds: ["x-ai/grok-4.7"] });
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "false");
+  });
+
+  it("retains flag-off explicit, Auto and unknown fallback results for legacy Free", async () => {
+    expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7", label: "Codenaya · Grok 4.7" });
+    expect(await validate("auto")).toMatchObject({ modelId: "x-ai/grok-4.7", label: "Auto · Grok 4.7" });
+    expect(await validate("unknown")).toMatchObject({ modelId: OPUS_FOR_EVERYONE.defaultModelId });
+  });
+
+  it("restricts explicit, Auto (including vision) and fallback to the eligible default", async () => {
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    await expect(validate("x-ai/grok-4.7")).rejects.toMatchObject({ status: 403, code: "plan_model_unavailable" });
+    for (const model of ["auto", "unknown", "z-ai/glm-5.3", OPUS_FOR_EVERYONE.defaultModelId]) {
+      expect(await validate(model)).toMatchObject({ modelId: OPUS_FOR_EVERYONE.defaultModelId });
+    }
+    expect(await validate("auto", true)).toMatchObject({ modelId: OPUS_FOR_EVERYONE.defaultModelId });
+  });
+
+  it("never uses a different default or paid vision route when the Free default is unusable", async () => {
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    mocks.platform.mockReturnValue({ ...OPUS_FOR_EVERYONE, defaultModelId: "missing" });
+    await expect(validate("unknown")).rejects.toMatchObject({ code: "plan_model_unavailable" });
+    mocks.platform.mockReturnValue({ ...OPUS_FOR_EVERYONE, models: OPUS_FOR_EVERYONE.models.map((m) =>
+      m.id === OPUS_FOR_EVERYONE.defaultModelId ? { ...m, vision: false } : m) });
+    await expect(validate("auto", true)).rejects.toMatchObject({ code: "auto_no_vision_model" });
+    await expect(validate(OPUS_FOR_EVERYONE.defaultModelId, true)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("gives enabled Pro no calendar cap, but enforces actual depletion with flag off", async () => {
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    policy({ plan: "pro", billingEnabled: true, creditsLeft: 3400 });
+    expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7" });
+    policy({ plan: "pro", billingEnabled: true, creditsLeft: 0, dayLeft: null });
+    await expect(validate("x-ai/grok-4.7")).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+    await expect(validate("auto")).rejects.toMatchObject({ code: "insufficient_credits" });
+  });
+
+  it("cannot use stored Pro to waive Free restrictions after expiry", async () => {
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    mocks.account.mockReturnValue({ plan: "pro" });
+    policy({ plan: "free", billingEnabled: true });
+    await expect(validate("x-ai/grok-4.7")).rejects.toMatchObject({ code: "plan_model_unavailable" });
+    await expect(resolve("x-ai/grok-4.7")).rejects.toBeInstanceOf(ProviderKeyError);
+  });
+
+  it("revalidates runs and workers against the project owner and the default set", async () => {
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    const run = await resolveWorkerModel({ internalKey: "ik", projectId: "p1" as never, choice: { modelId: "x-ai/grok-4.7" } });
+    expect(run.codingModel.id).toBe(OPUS_FOR_EVERYONE.defaultModelId);
+    expect(mocks.permission).toHaveBeenLastCalledWith({ internalKey: "ik", userId: "real_owner" });
+    mocks.project.mockResolvedValue(null);
+    await expect(resolve("auto")).rejects.toThrow("Project not found");
+  });
+
+  it("refuses holds for ordinary and promo sends and runs, with checkout off", async () => {
+    policy({ platformAllowed: false, reason: "on_hold" });
+    for (const id of ["x-ai/grok-4.7", "anthropic/claude-opus-5.5"]) {
+      await expect(validate(id)).rejects.toMatchObject({ status: 403, code: "billing_on_hold" });
+      await expect(resolve(id)).rejects.toBeInstanceOf(ProviderKeyError);
+    }
+  });
+
+  it("preserves owned BYOK under holds, refuses foreign keys and deletion", async () => {
+    policy({ platformAllowed: false, reason: "on_hold" });
+    mocks.query.mockResolvedValue(openAiKey);
+    const args = { internalKey: "ik", userId: "user_1", model: { keyId: "key_1", modelId: "gpt-6.1-sol" } };
+    expect(await validateModelChoice(args)).toMatchObject({ keyId: "key_1" });
+    mocks.query.mockResolvedValue(null);
+    await expect(validateModelChoice(args)).rejects.toMatchObject({ status: 403 });
+    policy({ platformAllowed: false, reason: "deleted" });
+    await expect(validateModelChoice(args)).rejects.toMatchObject({ status: 404 });
+    await expect(resolveRunModel({ internalKey: "ik", projectId: "p1" as never, choice: args.model })).rejects.toBeInstanceOf(ProviderKeyError);
+    expect(mocks.openProviderKey).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without constructing a provider when policy cannot be read", async () => {
+    mocks.permission.mockRejectedValue(new Error("Policy unavailable"));
+    await expect(validate("auto")).rejects.toThrow("Policy unavailable");
+    await expect(resolve("x-ai/grok-4.7")).rejects.toThrow("Policy unavailable");
+    expect(mocks.openProviderKey).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("stage 11c paid spend and promo contracts", () => {
+  it("Pro still obeys the USD spend cap at send and replay", async () => {
+    const now = Date.now();
+    mocks.platform.mockReturnValue({ ...OPUS_FOR_EVERYONE, models: OPUS_FOR_EVERYONE.models.map((m) =>
+      m.id === "x-ai/grok-4.7" ? { ...m, spendLimit: { perUserUsd: 1, totalUsd: 100, resets: "monthly" } } : m) });
+    mocks.permission.mockResolvedValue({ plan: "pro", billingEnabled: true, platformAllowed: true, creditsLeft: 3400 });
+    mocks.query.mockResolvedValue({ user: { periodStartsAt: Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1), spentUsd: 1 }, total: null });
+    await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model: "x-ai/grok-4.7" })).rejects.toMatchObject({ code: "model_limit_reached" });
+    await expect(resolveRunModel({ internalKey: "ik", projectId: "p1" as never, choice: { modelId: "x-ai/grok-4.7" } })).rejects.toMatchObject({ code: "model_limit_reached" });
+    expect(mocks.query).toHaveBeenLastCalledWith(expect.anything(), { internalKey: "ik", userId: "real_owner", modelId: "x-ai/grok-4.7" });
+  });
+  it("rollout does not grant promo access or replace its claims with paid credits", async () => {
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+    mocks.platform.mockReturnValue(ROUTED_SAVED);
+    mocks.permission.mockResolvedValue({ plan: "pro", billingEnabled: true, platformAllowed: true, creditsLeft: 0 });
+    mocks.query.mockResolvedValue(null);
+    await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model: "anthropic/claude-opus-5.5" })).rejects.toMatchObject({ code: "promo_not_claimed" });
   });
 });
