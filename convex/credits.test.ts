@@ -115,6 +115,36 @@ describe("credits.recordRunUsage", () => {
     expect(await account(t)).toMatchObject({ periodStartsAt: Date.UTC(2026, 10, 1), periodUsed: 3, dayUsed: 3 });
   });
 
+  test.each([Date.UTC(2026, 9, 30), Date.UTC(2027, 0, 1)])(
+    "charges only new cumulative usage after UTC boundary %i, including concurrent runs and replays",
+    async (boundary) => {
+      const t = setup();
+      vi.setSystemTime(boundary - 1);
+      const first = await seedMessage(t);
+      const second = await seedMessage(t);
+      const totals = (costUsd: number) => ({ inputTokens: 1000, outputTokens: 100, costUsd });
+      await record(t, first, totals(0.4)); // 60 credits before midnight
+      const stored = await account(t);
+      expect(stored?.dayUsed).toBe(60);
+
+      vi.setSystemTime(boundary);
+      // An old durable step replay neither charges nor materializes a reset.
+      await record(t, first, totals(0.4));
+      expect(await account(t)).toEqual(stored);
+      await Promise.all([record(t, first, totals(0.42)), record(t, second, totals(0.02))]);
+      const sameMonth = boundary === Date.UTC(2026, 9, 30);
+      expect(await account(t)).toMatchObject({
+        dayStartsAt: boundary, dayUsed: 6,
+        periodStartsAt: sameMonth ? Date.UTC(2026, 9, 1) : boundary,
+        periodUsed: sameMonth ? 66 : 6,
+      });
+      await record(t, first, totals(0.4));
+      await record(t, first, totals(0.42));
+      await record(t, second, totals(0.02));
+      expect(await account(t)).toMatchObject({ dayUsed: 6, periodUsed: sameMonth ? 66 : 6 });
+    },
+  );
+
   test("rejects totals that aren't finite or are negative, and never lowers one", async () => {
     const t = setup();
     const messageId = await seedMessage(t);
