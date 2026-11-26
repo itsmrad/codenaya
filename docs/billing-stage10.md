@@ -175,3 +175,35 @@ Clerk deliveries do not advance generation/inputRevision; new resource evidence
 advances only inputRevision and never releases a live receipt/recovery lease.
 Missing mirrored users fail closed for new per-user usage rows and emit a short
 warning without identifiers; existing usage rows remain chargeable.
+
+## 10d: deleted billing record retention
+
+`BILLING_RECORD_RETENTION_MONTHS = 18` in `src/features/billing/retention.ts`
+means UTC calendar months after deletion, clamped to month end and preserving the
+UTC time of day. The daily 03:00 UTC retention cron pages ten customers and deletes
+at most 190 financial children plus ten customers per transaction. Destructive
+child pagination drains indexed prefixes in order: grants, adjustments, receipts,
+purchases, subscriptions, customer last. A surviving customer is the resume marker;
+the next daily sweep can recover a lost continuation. Customer pagination keeps a
+fixed `deletedAt > undefined` index range across continuations; retention age is
+checked separately using each transaction's clock. Every deletion transaction
+rechecks explicit recovery completion (`required === false`, outcome `complete`),
+resource markers, uncertain customer creation, unfinished recovery progress, pending
+controls, active adjustment holds, pending/review/unknown refunds, open purchases,
+unresolved counts and actual receipt states (including unmapped quarantines for
+the same mode and provider customer), reversal watch and receipt/cancellation leases.
+Financial disputes in opened/challenged/expired/other states block purge using
+`disputeHolds` semantics even if an operator released the access hold. Deletion's permanent
+customer `hold` flag does not itself prevent retention expiry. Blocked customers stay
+available for support; no obligation is created or forced complete by this purge.
+
+User tombstones are never deleted. After the customer and payment mappings are gone,
+late/replayed financial events are unmapped and quarantined without grants; no email
+rebinding is attempted. No provider calls are made. New indexes support bounded
+blocker checks and child deletion; there are no required fields or data backfills.
+Existing rows missing explicit cancellation completion remain ineligible. Index
+backfill must complete before enabling the new cron; deployment is outside this PR.
+
+Review regressions exercise advancing-clock page-two/partial continuations,
+operator-released but unresolved disputes, and provider-customer quarantine scope.
+These use convex-test; real backend query-bound cursor validation is not yet proven.

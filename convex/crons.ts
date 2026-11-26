@@ -84,4 +84,6 @@ crons.interval(
 
 crons.interval("recover deleted billing customers", { minutes: 15 }, internal.billingCancellation.selectCancellationTargets, {});
 
+crons.cron("purge expired billing records", "0 3 * * *", internal.billingRetention.purgeExpiredBillingCustomers, { cursor: null });
+
 export default crons;

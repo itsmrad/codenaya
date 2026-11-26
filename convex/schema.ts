@@ -884,6 +884,7 @@ export default defineSchema({
     pollWindow: v.optional(billingPollWindowValidator),
     watchUntil: v.optional(v.number()),
   })
+    .index("by_deletedAt", ["deletedAt"])
     .index("by_mode_and_ownerTokenIdentifier", ["mode", "ownerTokenIdentifier"])
     .index("by_mode_and_customerId", ["mode", "customerId"])
     .index("by_mode_and_userId", ["mode", "userId"])
@@ -911,6 +912,8 @@ export default defineSchema({
     observedAt: v.optional(v.number()),
     cancellationRecoveryRequired: v.optional(v.boolean()),
   })
+    .index("by_customerRef_and_controlOperation", ["customerRef", "controlOperation"])
+    .index("by_customerRef_and_cancellationRecoveryRequired", ["customerRef", "cancellationRecoveryRequired"])
     .index("by_customerRef_and_controlPendingAt", ["customerRef", "controlPendingAt"])
     .index("by_mode_and_subscriptionId", ["mode", "subscriptionId"])
     .index("by_customerRef_and_status", ["customerRef", "status"]),
@@ -936,6 +939,7 @@ export default defineSchema({
     stagedGrantKey: v.optional(v.string()),
     revokedCredits: v.optional(v.number()),
   })
+    .index("by_customerRef_and_cancellationRecoveryRequired", ["customerRef", "cancellationRecoveryRequired"])
     .index("by_mode_and_stagedGrantKey", ["mode", "stagedGrantKey"])
     .index("by_mode_and_intentId", ["mode", "intentId"])
     .index("by_mode_and_paymentId", ["mode", "paymentId"])
@@ -1000,6 +1004,7 @@ export default defineSchema({
     // Every lot of a fully refunded or lost-disputed purchase: it no longer makes a paid period.
     fullyReversed: v.optional(v.literal(true)),
   })
+    .index("by_customerRef", ["customerRef"])
     .index("by_mode_and_sourceKey", ["mode", "sourceKey"])
     .index("by_purchaseRef", ["purchaseRef"])
     .index("by_userId_and_mode_and_kind_and_expiresAt", ["userId", "mode", "kind", "expiresAt"])
@@ -1028,6 +1033,7 @@ export default defineSchema({
   })
     .index("by_mode_and_providerId", ["mode", "providerId"])
     .index("by_mode_and_paymentId", ["mode", "paymentId"])
+    .index("by_customerRef_and_kind_and_status", ["customerRef", "kind", "status"])
     .index("by_customerRef_and_holdActive", ["customerRef", "holdActive"]),
 
   /**

@@ -25,7 +25,7 @@ export const refundCounts = (refund: ProviderRefund) => refund.status === "succe
 export const disputeCounts = (dispute: ProviderDispute) => dispute.status === "lost" || dispute.status === "accepted";
 const RELEASED_DISPUTE_STATUSES = new Set<ProviderDispute["status"]>(["won", "cancelled", "lost", "accepted"]);
 /** Opened, challenged, expired and unrecognised disputes hold the customer. */
-export const disputeHolds = (dispute: ProviderDispute) => !RELEASED_DISPUTE_STATUSES.has(dispute.status);
+export const disputeHolds = (dispute: Pick<ProviderDispute, "status">) => !RELEASED_DISPUTE_STATUSES.has(dispute.status);
 
 /**
  * The counted minor amount of one entry, or null when unknown. A missing amount counts as the
