@@ -82,4 +82,6 @@ crons.interval(
   internal.maintenance.pruneMcpAuditLog,
 );
 
+crons.interval("recover deleted billing customers", { minutes: 15 }, internal.billingCancellation.selectCancellationTargets, {});
+
 export default crons;

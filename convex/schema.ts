@@ -187,6 +187,11 @@ export const billingPollWindowValidator = v.object({
   }),
   blocked: v.boolean(),
 });
+export const billingCancellationProgressValidator = v.object({
+  generation: v.number(), inputRevision: v.number(), until: v.number(),
+  phase: v.union(v.literal("subscriptions"), v.literal("knownSubscriptions"), v.literal("payments"), v.literal("purchases"), v.literal("done")),
+  page: v.number(), offset: v.number(), cursor: v.union(v.string(), v.null()), blocked: v.boolean(),
+});
 export const billingGrantKindValidator = v.union(v.literal("current_period"), v.literal("rollover"), v.literal("top_up"));
 export const billingResourceIdsValidator = v.object({
   sessionId: v.optional(v.string()),
@@ -859,6 +864,9 @@ export default defineSchema({
     cancellationRecoveryRequired: v.optional(v.boolean()),
     cancellationNextAttemptAt: v.optional(v.number()),
     cancellationAttempts: v.optional(v.number()),
+    cancellationLeaseId: v.optional(v.string()),
+    cancellationLeaseExpiresAt: v.optional(v.number()),
+    cancellationProgress: v.optional(billingCancellationProgressValidator),
     cancellationLastOutcome: v.optional(v.union(v.literal("pending"), v.literal("retry"), v.literal("support"), v.literal("complete"))),
     activeSubscriptionRef: v.optional(v.id("billingSubscriptions")),
     pendingPurchaseRef: v.optional(v.id("billingPurchases")),
