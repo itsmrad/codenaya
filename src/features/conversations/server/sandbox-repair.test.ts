@@ -907,3 +907,23 @@ describe("parseBuildErrors", () => {
     expect(error.message).toMatch(/^Error occurred prerendering page "\/"[^\n]*\nError: STRIPE_SECRET_KEY is not set/);
   });
 });
+
+it("winds down repair on permission refusal instead of escalating to the fallback", async () => {
+  const requests = modelReplies(text("must never be called"));
+  let stopped = false;
+  const permission = {
+    get stopped() { return stopped; },
+    check: vi.fn(async () => false),
+    wrap: <T extends { run: (...args: never[]) => unknown }>(agent: T) => {
+      agent.run = (async () => { stopped = true; throw new Error("Access changed"); }) as T["run"];
+      return agent;
+    },
+  } as unknown as NonNullable<Parameters<typeof verifyAndFix>[0]["permission"]>;
+  const { result } = await run(fakeSandbox(), {
+    permission, modelId: "cheap", purpose: "utility", maxAttempts: 3,
+    fallback: { model, modelId: "coding", after: 1 },
+  });
+  expect(result.status).toBe("unverified");
+  expect(result.attempts).toBe(1);
+  expect(requests).toHaveLength(0);
+});

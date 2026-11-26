@@ -1,3 +1,4 @@
+import type { PermissionGate } from "@/features/billing/server/platform-permission";
 import { createAgent } from "@inngest/agent-kit";
 import type { GetStepTools } from "inngest";
 
@@ -17,6 +18,7 @@ import { TITLE_GENERATOR_SYSTEM_PROMPT } from "./constants";
 export const generateConversationTitle = async ({
   step,
   runModel,
+  permission,
   request,
   recordUsage,
   internalKey,
@@ -24,17 +26,18 @@ export const generateConversationTitle = async ({
 }: {
   step: GetStepTools<typeof inngest>;
   runModel: RunModel;
+  permission: PermissionGate;
   request: string;
   recordUsage: (raw: string | undefined) => Promise<void>;
   internalKey: string;
   conversationId: Id<"conversations">;
 }) => {
   try {
-    const titleAgent = createAgent({
+    const titleAgent = permission.wrap(createAgent({
       name: "title-generator",
       system: TITLE_GENERATOR_SYSTEM_PROMPT,
       model: runModel.title(0),
-    });
+    }), runModel.titleModelId ?? runModel.codingModel.id, "utility");
     const { output, raw } = await titleAgent.run(request, { step });
     await recordUsage(raw);
 

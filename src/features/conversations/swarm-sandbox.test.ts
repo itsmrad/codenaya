@@ -323,3 +323,16 @@ describe("swarm sandboxes", () => {
     expect(e2b.deleteSnapshot).toHaveBeenCalledWith("snap", { apiKey: "e2b_key" });
   });
 });
+
+it("passes the same inference gate and actual worker model into self-check repair", async () => {
+  const sandbox = fakeSandbox();
+  e2b.create.mockResolvedValue(sandbox);
+  e2b.connect.mockResolvedValue(sandbox);
+  const permission = { stopped: false, check: vi.fn(), wrap: vi.fn() } as unknown as NonNullable<VerifyAndFixOptions["permission"]>;
+  await selfCheckWorker({
+    step, ...ids, agentTaskId: "t1" as Id<"agentTasks">, ownedPaths, invokedAt: Date.now(),
+    model: {} as VerifyAndFixOptions["model"], permission, modelId: "worker-model",
+    onEvent: async () => {}, onResponse,
+  });
+  expect(mocks.verifyAndFix).toHaveBeenCalledWith(expect.objectContaining({ permission, modelId: "worker-model", purpose: "coding" }));
+});

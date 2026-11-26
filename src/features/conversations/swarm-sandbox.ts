@@ -241,7 +241,7 @@ type Step = { run: (id: string, fn: () => unknown) => Promise<unknown> };
  */
 export const selfCheckWorker = async ({
   step, internalKey, projectId, messageId, agentTaskId, ownedPaths, invokedAt, timeoutMs = WORKER_TIMEOUT_MS,
-  model, onEvent, onResponse, signal,
+  model, onEvent, onResponse, signal, permission, modelId,
 }: {
   step: Step;
   internalKey: string;
@@ -253,6 +253,8 @@ export const selfCheckWorker = async ({
   invokedAt: number;
   timeoutMs?: number;
   model: VerifyAndFixOptions["model"];
+  permission?: VerifyAndFixOptions["permission"];
+  modelId?: string;
   onEvent: (event: RepairEvent) => Promise<void>;
   onResponse: NonNullable<VerifyAndFixOptions["onResponse"]>;
   signal?: AbortSignal;
@@ -274,7 +276,7 @@ export const selfCheckWorker = async ({
     runId: messageId,
     messageId,
     agentTaskId,
-    model,
+    model, permission, modelId, purpose: "coding",
     // Started from project files only, never variables or secret files: no value to print.
     secrets: [],
     maxAttempts: started.maxAttempts,

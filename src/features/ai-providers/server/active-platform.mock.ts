@@ -15,6 +15,10 @@ export const withEnvPlatform =
   async (ref: Parameters<typeof getFunctionName>[0], args: unknown) => {
     const name = getFunctionName(ref);
     if (name === "platformCatalog:getForServer") return saved?.() ?? null;
+    if (name === "system:getMessageById") {
+      const row = await (query as (ref: unknown, args: unknown) => unknown)(ref, args);
+      return row && typeof row === "object" && "projectId" in row ? row : null;
+    }
     if (name === "credits:getForServer") return account?.() ?? null;
     return (query as (ref: unknown, args: unknown) => unknown)(ref, args);
   };
@@ -24,7 +28,7 @@ export const withPlatformPermission = (
   mutation: (...args: never[]) => unknown,
   account?: () => unknown,
 ) => async (ref: Parameters<typeof getFunctionName>[0], args: unknown) => {
-  if (getFunctionName(ref) === "billingEntitlement:getForServer") {
+  if (["billingEntitlement:getForServer", "billingEntitlement:permissionForServer"].includes(getFunctionName(ref))) {
     return accountAvailability({
       account: (account?.() ?? null) as CreditUsage | null,
       enabled: false, periodLots: [], activeLots: [], debt: 0, held: false, deleted: false,
