@@ -114,7 +114,7 @@ export interface RunModelChoice {
 export class ModelChoiceError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 402 | 403 | 503,
+    readonly status: 400 | 402 | 403 | 404 | 503,
     readonly code?: string,
   ) {
     super(message);
