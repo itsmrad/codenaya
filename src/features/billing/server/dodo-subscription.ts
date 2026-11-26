@@ -1,5 +1,5 @@
 import { readBoundedBody } from "./bounded-body";
-import type { DodoReconcilerConfig } from "./dodo-config";
+import type { DodoEnvironment, DodoManagementConfig, DodoReconcilerConfig } from "./dodo-config";
 import { DODO_READ_TIMEOUT_MS, MAX_PROVIDER_BODY_BYTES } from "./dodo-reads";
 
 // customerId is the owned binding from prepareControl, never browser input.
@@ -65,6 +65,42 @@ export async function setDodoCancellation(
     // No write before ownership verification; after dispatch the outcome is ambiguous.
     return { kind: wrote ? "unknown" : "refused" };
   } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Empty until stage 13 proves each mode's session host AND permitted merchant actions.
+export const DODO_PORTAL_HOSTS: Record<DodoEnvironment, readonly string[]> = {
+  test_mode: [], live_mode: [],
+};
+
+/** Implements the pinned 2.63.0 portal contract; never log or persist the session link. */
+export async function createDodoPortal(
+  config: DodoManagementConfig, customerId: string, fetchImpl: typeof fetch = fetch,
+): Promise<{ url: string } | null> {
+  const hosts = DODO_PORTAL_HOSTS[config.environment];
+  if (!hosts?.length || !ID.test(customerId)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DODO_READ_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(`${BASE[config.environment]}/customers/${customerId}/customer-portal/session?send_email=false`, {
+      method: "POST", redirect: "manual", signal: controller.signal,
+      headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json" },
+    });
+    if (!response.ok) { await response.body?.cancel(); return null; }
+    const bytes = await readBoundedBody(response, MAX_PROVIDER_BODY_BYTES);
+    if (!bytes) return null;
+    const body: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (!body || typeof body !== "object" || !("link" in body) || typeof body.link !== "string") return null;
+    const url = new URL(body.link);
+    if (url.protocol !== "https:" || url.username || url.password || url.port ||
+      !hosts.includes(url.hostname) || body.link !== body.link.trim()) return null;
+    return { url: url.href };
+  } catch {
+    // Provider errors may contain credentials or the bearer session URL.
+    return null;
+  } finally {
+    controller.abort();
     clearTimeout(timer);
   }
 }

@@ -69,3 +69,30 @@ validateInternalKey first, then verifyAuth and both ownerTokenIdentifier/subject
 checks against the resource's customer. The small domain helper is intentionally
 local; broad admin/auth consolidation would change unrelated trust boundaries.
 Same-origin and JSON guards are the identical established shared request helpers.
+
+## Stage 10a2: owned portal (disabled pending verification)
+
+`POST /api/billing/portal` accepts only empty JSON, with the existing same-origin,
+Clerk, rate-limit and authenticated Convex bridge guards. `prepareControl` selects
+only the live caller's bound customer using both token identifier and subject.
+Portal access requires no active subscription and remains available on holds and
+with checkout disabled; deleted/unbound owners are refused. It makes no local
+billing writes, refunds, grants or changes to settled access/recovery obligations.
+
+The adapter implements the pinned 2.63.0 contract directly using the existing
+injected fetch convention (no SDK dependency):
+[customer-portal.ts](https://unpkg.com/dodopayments@2.63.0/src/resources/customers/customer-portal.ts)
+lines 20–29 send POST `/customers/{id}/customer-portal/session` with query
+`send_email=false`, no return URL; `CustomerPortalSession.link` is the response.
+It refuses redirects, bounds response bytes and time, and sanitizes all failures.
+Only the owned validated HTTPS URL is returned, with `no-store`; never log or
+persist it. Every route response, including refusals, is `no-store`.
+
+Both `DODO_PORTAL_HOSTS` mode lists intentionally remain empty: requests return
+`503 { code: "portal_unavailable" }` before any provider call. Static login
+hosts do not prove API session-link hosts. Stage 13 must prove the exact host
+separately in each mode and check merchant actions (period-end-only cancellation;
+plan changes, pause and retention offers off) before a reviewed list change.
+Immediate/next-cycle cancellation settings are independent; documentation is not
+merchant configuration evidence. Any provider-side cancellation still preserves
+settled paidThrough/lots; refunds and disputes remain in the reversal path.

@@ -164,3 +164,47 @@ test("a deferred adapter PATCH and interleaved reconciliation cannot admit an op
   await canonical(NOW + 60_001, true);
   expect((await sub())?.controlPendingAt).toBeUndefined();
 });
+
+test("portal requires the internal bridge and both live owner identity fields", async () => {
+  const { t, alice } = await setup();
+  const args = { internalKey: KEY, mode, operation: "portal" as const };
+  await expect(t.mutation(api.billingLifecycle.prepareControl, args)).rejects.toThrow();
+  await expect(alice.mutation(api.billingLifecycle.prepareControl, { ...args, internalKey: "wrong" })).rejects.toThrow();
+  for (const who of [{ subject: "bob", tokenIdentifier: "dummy|bob" },
+    { subject: "alice", tokenIdentifier: "foreign|alice" }, { subject: "bob", tokenIdentifier: "dummy|alice" }]) {
+    expect(await t.withIdentity(who).mutation(api.billingLifecycle.prepareControl, args))
+      .toEqual({ kind: "refused", code: "unavailable" });
+  }
+  expect(await alice.mutation(api.billingLifecycle.prepareControl, { ...args, mode: "live_mode" }))
+    .toEqual({ kind: "refused", code: "unavailable" });
+});
+
+test.each(["customer", "dispute", "support_hold"] as const)("portal allows %s holds without a subscription, changes no billing state", async hold => {
+  const { t, refs, alice, prepare } = await setup();
+  await prepare(); // A pending cancellation also must not block payment/support management.
+  await t.run(async ctx => {
+    await ctx.db.patch("billingCustomers", refs.customerRef, { hold: hold === "customer", activeSubscriptionRef: undefined });
+    if (hold !== "customer") await ctx.db.insert("billingAdjustments", { mode, customerRef: refs.customerRef,
+      paymentId: "pay_dummy", kind: hold, providerId: "hold_dummy", status: "active", countedMinor: 0,
+      holdActive: true, observedAt: NOW });
+  });
+  const snapshot = () => t.run(async ctx => ({ customer: await ctx.db.get("billingCustomers", refs.customerRef),
+    sub: await ctx.db.get("billingSubscriptions", refs.subscriptionRef), lot: await ctx.db.get("billingGrants", refs.lotRef) }));
+  const before = await snapshot();
+  expect(await alice.mutation(api.billingLifecycle.prepareControl, { internalKey: KEY, mode, operation: "portal" }))
+    .toEqual({ kind: "portal", customerId: "cus_alice" });
+  expect(await snapshot()).toEqual(before);
+});
+
+test.each(["unbound", "deleted-customer", "deleted-user", "missing-user"])("portal refuses %s", async reason => {
+  const { t, refs, alice } = await setup();
+  await t.run(async ctx => {
+    if (reason === "unbound") await ctx.db.patch("billingCustomers", refs.customerRef, { customerId: undefined });
+    if (reason === "deleted-customer") await ctx.db.patch("billingCustomers", refs.customerRef, { deletedAt: NOW });
+    const user = await ctx.db.query("users").withIndex("by_clerkUserId", q => q.eq("clerkUserId", "alice")).unique();
+    if (reason === "deleted-user") await ctx.db.patch("users", user!._id, { deletedAt: NOW });
+    if (reason === "missing-user") await ctx.db.delete("users", user!._id);
+  });
+  expect(await alice.mutation(api.billingLifecycle.prepareControl, { internalKey: KEY, mode, operation: "portal" }))
+    .toEqual({ kind: "refused", code: "unavailable" });
+});
