@@ -732,7 +732,7 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,
-    ].map((tool) => ({ ...tool, handler: (input: Parameters<Tool.Any["handler"]>[0], options: Parameters<Tool.Any["handler"]>[1]) => permission.stopped
+    ].map((tool): Tool.Any => ({ ...tool, handler: (input, options) => permission.stopped
       ? Promise.resolve(PERMISSION_STOP_REPLY) : tool.handler(input, options) })).map(swarm.guard).map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.

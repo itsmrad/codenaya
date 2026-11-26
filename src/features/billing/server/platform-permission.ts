@@ -63,9 +63,16 @@ export async function assertPlatformInferenceAllowed(args: InferenceArgs): Promi
 
 const inferenceContext = new AsyncLocalStorage<() => Promise<boolean>>();
 
+interface PermissionOutput extends Middleware.StaticTransform {
+  Out: this["In"];
+}
+
 /** Public SDK hook runs before a new AI gateway operation is reported to Inngest. */
 export class InferencePermissionMiddleware extends Middleware.BaseMiddleware {
   readonly id = "inference-permission";
+  // This gate transforms no outputs; keep the client's existing serialization types.
+  declare stepOutputTransform: PermissionOutput;
+  declare functionOutputTransform: PermissionOutput;
   async transformStepInput(args: Middleware.TransformStepInputArgs) {
     if ((args.stepInfo.stepType === "ai.infer" || args.stepInfo.stepType === "invoke") && !args.stepInfo.memoized) {
       const check = inferenceContext.getStore();
