@@ -13,8 +13,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  const { withEnvPlatform, withPlatformPermission } = await import("@/features/ai-providers/server/active-platform.mock");
+  return { convex: { query: withEnvPlatform(mocks.query), mutation: withPlatformPermission(mocks.mutation) } };
 });
 
 // A small budget keeps the replayed run fast; the routing is the same at 40.

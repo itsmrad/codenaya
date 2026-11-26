@@ -1086,7 +1086,7 @@ describe("resolveWorkerModel (swarm worker)", () => {
   const resolve = (choice: { keyId?: string; modelId: string }) =>
     resolveWorkerModel({ internalKey: "ik", projectId: "p1" as never, choice });
 
-  it("does not let a worker use a hidden utility as a coding model", async () => {
+  it("preserves legacy hidden worker routing while billing rollout is off", async () => {
     mocks.platform.mockReturnValue({
       ...ROUTED_SAVED,
       models: [
@@ -1098,9 +1098,11 @@ describe("resolveWorkerModel (swarm worker)", () => {
       ],
     });
     const run = await resolve({ modelId: "x-ai/grok-4.7" });
-    expect(target(run.coding(0.3))).toMatchObject({ id: "x-ai/grok-4.7", authKey: "sk-or-platform" });
-    expect(run.metering.coding).toEqual({ mode: "blended", usdPerMTok: 1 });
-    expect(run.codingModel.id).toBe("x-ai/grok-4.7");
+    expect(target(run.coding(0.3))).toMatchObject({ id: "anthropic/claude-haiku-5.5", authKey: "sk-or-platform" });
+    expect(run.metering.coding).toEqual({ mode: "blended", usdPerMTok: 2 });
+    expect(run.codingModel.id).toBe("anthropic/claude-haiku-5.5");
+    vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");
+    expect((await resolve({ modelId: "x-ai/grok-4.7" })).codingModel.id).toBe(ROUTED_SAVED.defaultModelId);
   });
 
   it("runs on the run's model when the catalog has no Haiku", async () => {
@@ -1133,7 +1135,7 @@ describe("resolveWorkerModel (swarm worker)", () => {
         catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { hidden: true }),
       ],
     });
-    expect(target((await resolveSub({ modelId: "x-ai/grok-4.7" })).coding()).id).toBe("x-ai/grok-4.7");
+    expect(target((await resolveSub({ modelId: "x-ai/grok-4.7" })).coding()).id).toBe("anthropic/claude-sonnet-5.5");
 
     mocks.query.mockResolvedValue({ ...openAiKey, provider: "anthropic" });
     expect(target((await resolveSub({ keyId: "key_1", modelId: "claude-opus-5-5" })).coding()).id).toBe("claude-sonnet-5-5");
@@ -1235,15 +1237,16 @@ describe("stage 11c authoritative access", () => {
 
 
 describe("stage 11c paid spend and promo contracts", () => {
-  it("Pro still obeys the USD spend cap at send and replay", async () => {
+  it("Pro obeys USD spend admission at send without repeating it on replay", async () => {
     const now = Date.now();
     mocks.platform.mockReturnValue({ ...OPUS_FOR_EVERYONE, models: OPUS_FOR_EVERYONE.models.map((m) =>
       m.id === "x-ai/grok-4.7" ? { ...m, spendLimit: { perUserUsd: 1, totalUsd: 100, resets: "monthly" } } : m) });
     mocks.permission.mockResolvedValue({ plan: "pro", billingEnabled: true, platformAllowed: true, creditsLeft: 3400 });
     mocks.query.mockResolvedValue({ user: { periodStartsAt: Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1), spentUsd: 1 }, total: null });
     await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model: "x-ai/grok-4.7" })).rejects.toMatchObject({ code: "model_limit_reached" });
-    await expect(resolveRunModel({ internalKey: "ik", projectId: "p1" as never, choice: { modelId: "x-ai/grok-4.7" } })).rejects.toMatchObject({ code: "model_limit_reached" });
-    expect(mocks.query).toHaveBeenLastCalledWith(expect.anything(), { internalKey: "ik", userId: "real_owner", modelId: "x-ai/grok-4.7" });
+    mocks.query.mockClear();
+    expect((await resolveRunModel({ internalKey: "ik", projectId: "p1" as never, choice: { modelId: "x-ai/grok-4.7" } })).codingModel.id).toBe("x-ai/grok-4.7");
+    expect(mocks.query.mock.calls.map(([ref]) => getFunctionName(ref))).not.toContain("modelSpend:getForServer");
   });
   it("rollout does not grant promo access or replace its claims with paid credits", async () => {
     vi.stubEnv("CODENAYA_BILLING_ENABLED", "true");

@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog), mutation: mocks.mutation } };
+  const { withEnvPlatform, withPlatformPermission } = await import("@/features/ai-providers/server/active-platform.mock");
+  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog), mutation: withPlatformPermission(mocks.mutation) } };
 });
 
 import { RUN_IMAGES_REFUSED_MESSAGE } from "@/features/ai-providers/server/resolve-run-model";

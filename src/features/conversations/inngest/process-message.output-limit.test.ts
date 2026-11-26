@@ -15,8 +15,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  const { withEnvPlatform, withPlatformPermission } = await import("@/features/ai-providers/server/active-platform.mock");
+  return { convex: { query: withEnvPlatform(mocks.query), mutation: withPlatformPermission(mocks.mutation) } };
 });
 // The Anthropic case runs on a user's key; only the unsealing is faked.
 vi.mock("@/features/ai-providers/server/sealed-key", () => ({

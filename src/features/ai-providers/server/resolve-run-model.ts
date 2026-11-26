@@ -499,18 +499,19 @@ export async function resolveRunModel({
     // Re-read, not taken from the event: the admin may have re-routed, hidden
     // or removed the model since the route checked it.
     const catalog = await platformCatalog(internalKey);
-    const allowed = allowedOrdinaryModels(catalog, view, { restrictFree: billingRolloutEnabled() });
-    // Workers use ordinary coding permission, never the utility exception.
-    // A promo entry needs the owner's claim; the run's own model needs none it doesn't already have.
-    const workerModel = workerModelIds.map((id) => allowed.find((m) => m.id === id))
+    const rollout = billingRolloutEnabled();
+    const allowed = allowedOrdinaryModels(catalog, view, { restrictFree: rollout });
+    // Preserve legacy hidden worker routes until rollout; promo still needs its own claim.
+    const workerCandidates = rollout ? allowed : catalog.models;
+    const workerModel = workerModelIds.map((id) => workerCandidates.find((m) => m.id === id))
       .find((m) => m && isPlatformConfigured(m.provider) && !promoKindOf(m.access));
     const selected = resolveCatalogModel(catalog, choice.modelId);
     const model = workerModel ?? (workerModelIds.length && !promoKindOf(selected.access)
       ? resolveCatalogModel({ ...catalog, models: allowed }, choice.modelId) : selected);
-    if (!model || (!promoKindOf(model.access) && !allowed.some((m) => m.id === model.id))) {
+    if (!model || (!workerModel && !promoKindOf(model.access) && !allowed.some((m) => m.id === model.id))) {
       throw new ProviderKeyError(planModelUnavailable().message);
     }
-    await refuseOverSpendLimit({ internalKey, userId: project.ownerId, model });
+    // Spend admission is send-only (ADR 0012); replay keeps the admitted run's bounded overrun.
     // The key can go missing between the route's check and the run (a redeploy).
     if (!isPlatformConfigured(model.provider)) {
       throw new ProviderKeyError(AI_NOT_CONFIGURED_MESSAGE);

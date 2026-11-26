@@ -1,4 +1,6 @@
 import { getFunctionName } from "convex/server";
+import { accountAvailability } from "@/features/billing/entitlement";
+import type { CreditUsage } from "@/features/billing/credits";
 
 /**
  * For tests that stub `convex.query`: answers the catalog read
@@ -16,3 +18,17 @@ export const withEnvPlatform =
     if (name === "credits:getForServer") return account?.() ?? null;
     return (query as (ref: unknown, args: unknown) => unknown)(ref, args);
   };
+
+/** Legacy entitlement fixture for integration tests that use the real model resolver. */
+export const withPlatformPermission = (
+  mutation: (...args: never[]) => unknown,
+  account?: () => unknown,
+) => async (ref: Parameters<typeof getFunctionName>[0], args: unknown) => {
+  if (getFunctionName(ref) === "billingEntitlement:getForServer") {
+    return accountAvailability({
+      account: (account?.() ?? null) as CreditUsage | null,
+      enabled: false, periodLots: [], activeLots: [], debt: 0, held: false, deleted: false,
+    }, Date.now());
+  }
+  return (mutation as (ref: unknown, args: unknown) => unknown)(ref, args);
+};
