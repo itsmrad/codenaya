@@ -35,6 +35,7 @@ async function control(request: Request, operation: "cancel" | "uncancel"): Prom
   const next = await fetchMutation(api.billingLifecycle.prepareControl, { internalKey, mode: config.environment, operation }, { token });
   if (next.kind === "refused") return next.code === "unavailable" ? unavailable()
     : reply(409, { error: "Subscription control refused", code: next.code });
+  if (next.kind !== "call") return unavailable();
   const result = await setDodoCancellation({ ...config, customerId: next.customerId, controlWriteUntil: next.writeUntil }, {
     subscriptionId: next.subscriptionId, timing: operation === "cancel" ? "period_end" : "resume",
   });
