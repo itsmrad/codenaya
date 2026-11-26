@@ -213,14 +213,65 @@ test.each(["payments", "purchases"] as const)("late succeeded charge in %s requi
   expect(await t.run(ctx => ctx.db.query("billingGrants").take(1))).toEqual([]);
 });
 
-test("settled charge before the deletion skew window can finish recovery", async () => {
-  const t = setup(), ref = await customer(t); provider({ succeededAt: NOW - PROVIDER_CLOCK_SKEW_MS - 2 });
-  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "old_charge",
+async function seedGrant(t: T, ref: Id<"billingCustomers">, purchaseRef: Id<"billingPurchases">, extra = {}) {
+  return t.run(ctx => ctx.db.insert("billingGrants", { customerRef: ref, purchaseRef, mode, userId: "alice",
+    sourceKey: "top_up:pay_dummy:0", kind: "top_up", quantity: terms.credits, consumed: 0, revoked: 0,
+    expiresAt: NOW + 10000, ...extra }));
+}
+
+test.each(["valid", "spent", "reversed", "missing", "mode", "customer", "user", "quantity", "rollover", "source"])(
+  "historical settlement requires persisted matching grant evidence: %s", async proof => {
+    const t = setup(), ref = await customer(t); provider({ succeededAt: NOW - PROVIDER_CLOCK_SKEW_MS - 2 });
+    const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "old_charge",
+      state: "settled", paymentId: "pay_dummy", terms, cancellationRecoveryRequired: true }));
+    const foreign = proof === "customer" ? await customer(t, { userId: "bob", ownerTokenIdentifier: "dummy|bob" }) : ref;
+    if (proof !== "missing") await seedGrant(t, foreign, purchaseRef, {
+      ...(proof === "mode" ? { mode: "live_mode" as const } : {}),
+      ...(proof === "user" ? { userId: "bob" } : {}),
+      ...(proof === "quantity" ? { quantity: 1 } : {}),
+      ...(proof === "rollover" ? { kind: "rollover" as const } : {}),
+      ...(proof === "source" ? { sourceKey: "top_up:pay_other:0" } : {}),
+      ...(proof === "spent" ? { consumed: terms.credits, exhausted: true as const, expiresAt: NOW - 1 } : {}),
+      ...(proof === "reversed" ? { revoked: terms.credits, exhausted: true as const, fullyReversed: true as const } : {}),
+    });
+    const grants = await t.run(ctx => ctx.db.query("billingGrants").take(10));
+    await phase(t, ref, "purchases");
+    const c = await claim(t, ref);
+    expect(c.resources[0].grantProven).toBe(["valid", "spent", "reversed"].includes(proof));
+    vi.setSystemTime(NOW + CANCELLATION_LEASE_MS + 1);
+    await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+    const valid = ["valid", "spent", "reversed"].includes(proof);
+    expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: valid ? "complete" : "support", cancellationRecoveryRequired: !valid, hold: true });
+    expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "settled", cancellationRecoveryRequired: !valid });
+    expect(await t.run(ctx => ctx.db.query("billingGrants").take(10))).toEqual(grants);
+  });
+
+
+test("grant evidence is rechecked before the purchase marker can clear", async () => {
+  const t = setup(), ref = await customer(t);
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "grant_race",
     state: "settled", paymentId: "pay_dummy", terms, cancellationRecoveryRequired: true }));
+  const grantRef = await seedGrant(t, ref, purchaseRef);
+  await phase(t, ref, "purchases");
+  const c = await claim(t, ref);
+  expect(c.resources[0].grantProven).toBe(true);
+  await t.run(ctx => ctx.db.delete("billingGrants", grantRef));
+  expect(await t.mutation(internal.billingCancellation.commitCancellationEvidence, { customerRef: ref, generation: c.generation,
+    inputRevision: c.inputRevision, leaseId: c.leaseId, evidence: { progress: { ...c.progress, phase: "done" }, failed: false,
+      support: false, retryAt: 0, ended: [], resolved: [purchaseRef], findings: [] } })).toBe("pending");
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "support", cancellationRecoveryRequired: true });
+  expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "settled", cancellationRecoveryRequired: true });
+});
+
+test.each([true, false])("original period grant must match subscription identity: %s", async matching => {
+  const t = setup(), ref = await customer(t); provider({ succeededAt: NOW - PROVIDER_CLOCK_SKEW_MS - 2 });
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "period_charge",
+    state: "settled", paymentId: "pay_dummy", subscriptionId: "sub_old", terms: { ...terms, sku: "pro_monthly" }, cancellationRecoveryRequired: true }));
+  await seedGrant(t, ref, purchaseRef, { kind: "current_period", serviceStart: NOW - 10000, serviceEnd: NOW + 10000,
+    sourceKey: `period:${matching ? "sub_old" : "sub_other"}:${NOW - 10000}:${NOW + 10000}` });
   await phase(t, ref, "purchases");
   await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
-  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "complete" });
-  expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "settled", cancellationRecoveryRequired: false });
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: matching ? "complete" : "support", cancellationRecoveryRequired: !matching });
 });
 
 test("verified late-bound customer can recover while its creation state stays unknown", async () => {
@@ -256,16 +307,18 @@ test("temporary receipt blocker retries with backoff and exhausts to support", a
   }
 });
 
-test.each(["marker", "renewable", "control", "processing", "open", "unknown"])("final proof refuses leftover %s outside the current cursor", async blocker => {
+test.each(["marker", "renewable", "control", "processing", "open", "unknown", "ungranted"])("final proof catches %s inserted after the last purchase claim", async blocker => {
   const t = setup(), ref = await customer(t); provider();
-  if (blocker === "processing" || blocker === "open" || blocker === "unknown") await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "hidden",
-    state: blocker, terms }));
+  await phase(t, ref, "purchases");
+  const c = await claim(t, ref);
+  expect(c.localDone).toBe(true); expect(c.resources).toEqual([]);
+  if (["processing", "open", "unknown", "ungranted"].includes(blocker)) await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "hidden",
+    state: blocker === "ungranted" ? "settled" : blocker as "processing" | "open" | "unknown", terms }));
   else await t.run(ctx => ctx.db.insert("billingSubscriptions", { customerRef: ref, mode, subscriptionId: "sub_hidden", productId: "pdt_pro",
     status: blocker === "renewable" ? "active" : "cancelled", cancellationRecoveryRequired: blocker === "marker",
     ...(blocker === "control" ? { controlPendingAt: NOW, controlOperation: "cancel" as const } : {}) }));
-  await phase(t, ref, "purchases");
-  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
-  expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: "retry" });
+  expect(await commit(t, ref, c, "done")).toBe("pending");
+  expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: blocker === "ungranted" ? "support" : "retry" });
 });
 
 test("ended subscription status is persisted atomically with marker clearance, retaining paid periods", async () => {
@@ -292,4 +345,15 @@ test("expired open checkout becomes terminal before its marker clears without to
   for (const table of ["purchases", "subscriptions"] as const)
     await t.mutation(internal.billingDeletion.markDeletionBatch, { customerRef: ref, table, cursor: null });
   expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "complete", cancellationRecoveryRequired: false });
+});
+
+
+test("quarantined purchase retains its marker and requires support even with an expired unpaid session", async () => {
+  const t = setup(), ref = await customer(t); provider();
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "quarantined_create",
+    state: "quarantined", sessionId: "cks_dummy", cancellationRecoveryRequired: true, terms }));
+  await phase(t, ref, "purchases");
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "quarantined", cancellationRecoveryRequired: true });
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "support", cancellationRecoveryRequired: true });
 });

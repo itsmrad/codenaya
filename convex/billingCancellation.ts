@@ -3,9 +3,11 @@ import { v, type Infer } from "convex/values";
 import { fetchCustomer, fetchCheckoutSession, fetchPayment, fetchSubscription, listCustomerResources } from "../src/features/billing/server/dodo-reads";
 import { setDodoCancellation } from "../src/features/billing/server/dodo-subscription";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import { internalAction, internalMutation, type QueryCtx } from "./_generated/server";
 import { recordReceiptRow } from "./billing";
 import { readConvexBillingConfig } from "./billingEnv";
+import { MAX_LOTS_PER_PURCHASE } from "./billingReversals";
 import { CHECKOUT_SESSION_TTL_MS, PROVIDER_CLOCK_SKEW_MS, MAX_POLL_PAGES } from "./billingPoll";
 import { sha256Hex } from "./billingWebhook";
 import { billingCancellationProgressValidator, billingModeValidator } from "./schema";
@@ -24,7 +26,7 @@ type Progress = Infer<typeof billingCancellationProgressValidator>;
 const resourceValidator = v.object({
   subscriptionRef: v.optional(v.id("billingSubscriptions")), purchaseRef: v.optional(v.id("billingPurchases")),
   subscriptionId: v.optional(v.string()), sessionId: v.optional(v.string()), paymentId: v.optional(v.string()),
-  state: v.optional(v.string()), expiresAt: v.optional(v.number()),
+  state: v.optional(v.string()), expiresAt: v.optional(v.number()), grantProven: v.optional(v.boolean()),
 });
 const findingValidator = v.object({
   kind: v.union(v.literal("subscription"), v.literal("payment")), id: v.string(), status: v.string(), bodyDigest: v.string(),
@@ -33,6 +35,23 @@ const evidenceValidator = v.object({
   progress: billingCancellationProgressValidator, failed: v.boolean(), support: v.boolean(), retryAt: v.number(),
   ended: v.array(v.id("billingSubscriptions")), resolved: v.array(v.id("billingPurchases")), findings: v.array(findingValidator),
 });
+
+// Financial evidence survives expiry, spending and reversal; a rollover alone is not the original grant.
+async function hasPurchaseGrant(ctx: QueryCtx, customer: Doc<"billingCustomers">, purchase: Doc<"billingPurchases">) {
+  const lots = await ctx.db.query("billingGrants").withIndex("by_purchaseRef", q => q.eq("purchaseRef", purchase._id))
+    .take(MAX_LOTS_PER_PURCHASE + 1);
+  const originals = lots.filter(lot => lot.kind !== "rollover");
+  if (lots.length > MAX_LOTS_PER_PURCHASE || originals.length !== 1 || !purchase.paymentId ||
+    purchase.customerRef !== customer._id || purchase.mode !== customer.mode) return false;
+  const lot = originals[0];
+  if (lot.customerRef !== customer._id || lot.userId !== customer.userId || lot.mode !== customer.mode ||
+    lot.quantity !== purchase.terms.credits) return false;
+  return purchase.terms.sku === "top_up"
+    ? lot.kind === "top_up" && lot.sourceKey === `top_up:${purchase.paymentId}:0`
+    : lot.kind === "current_period" && !!purchase.subscriptionId && lot.serviceStart !== undefined &&
+      lot.serviceEnd !== undefined && lot.serviceStart < lot.serviceEnd && lot.expiresAt === lot.serviceEnd &&
+      lot.sourceKey === `period:${purchase.subscriptionId}:${lot.serviceStart}:${lot.serviceEnd}`;
+}
 
 export const selectCancellationTargets = internalMutation({
   args: {}, returns: v.null(),
@@ -92,6 +111,7 @@ export const claimCancellation = internalMutation({
       const page = await ctx.db.query("billingPurchases").withIndex("by_customerRef_and_state", q => q.eq("customerRef", customerRef))
         .paginate({ cursor: progress.cursor, numItems: CHUNK });
       for (const row of page.page) resources.push({ purchaseRef: row._id, state: row.state,
+        ...(row.state === "settled" ? { grantProven: await hasPurchaseGrant(ctx, customer, row) } : {}),
         ...(row.sessionId ? { sessionId: row.sessionId } : {}), ...(row.paymentId ? { paymentId: row.paymentId } : {}),
         ...(row.expiresAt === undefined ? {} : { expiresAt: row.expiresAt }) });
       nextCursor = page.continueCursor; localDone = page.isDone;
@@ -202,11 +222,12 @@ export const recoverCustomer = internalAction({
             if (resource.paymentId) {
               const payment = await fetchPayment(config, resource.paymentId, boundedFetch);
               safe = !lateCharge(payment) && payment.customerId === claim.customerId &&
-                (resource.state === "settled" && payment.status === "succeeded" ||
+                (resource.state === "settled" && resource.grantProven === true && payment.status === "succeeded" ||
                   DEAD_PAYMENT.has(payment.status) && (!resource.sessionId || safe));
               await finding("payment", resource.paymentId, payment.status);
             }
-            if (["unknown", "preparing", "quarantined"].includes(resource.state ?? "") && !resource.sessionId && !resource.paymentId) evidence.support = true;
+            if (resource.state === "settled" && !resource.grantProven) { evidence.support = true; safe = false; }
+            if (resource.state === "quarantined" || ["unknown", "preparing"].includes(resource.state ?? "") && !resource.sessionId && !resource.paymentId) evidence.support = true;
             if (["unknown", "preparing", "processing", "quarantined"].includes(resource.state ?? "")) safe = false;
             if (!safe) progress.blocked = true;
             else evidence.resolved.push(resource.purchaseRef);
@@ -259,7 +280,10 @@ export const commitCancellationEvidence = internalMutation({
       if (finding.kind === "payment" && finding.status === "succeeded") {
         const bound = await ctx.db.query("billingPurchases").withIndex("by_mode_and_paymentId", q =>
           q.eq("mode", customer.mode).eq("paymentId", finding.id)).unique();
-        if (bound?.customerRef === customerRef && bound.state === "settled") continue;
+        if (bound?.customerRef === customerRef && bound.state === "settled") {
+          if (!await hasPurchaseGrant(ctx, customer, bound)) { evidence.support = true; evidence.progress.blocked = true; }
+          continue;
+        }
         evidence.progress.blocked = true;
       }
       await recordReceiptRow(ctx, { customerRef, mode: customer.mode, webhookId: `poll:${finding.kind}:${finding.id}:${finding.status}`,
@@ -281,6 +305,7 @@ export const commitCancellationEvidence = internalMutation({
     for (const ref of evidence.resolved) {
       const row = await ctx.db.get("billingPurchases", ref);
       if (row?.customerRef !== customerRef || row.mode !== customer.mode) return "stale";
+      if (row.state === "settled" && !await hasPurchaseGrant(ctx, customer, row)) { evidence.support = true; continue; }
       await ctx.db.patch("billingPurchases", ref, { state: row.state === "settled" ? "settled" : "terminal", cancellationRecoveryRequired: false });
     }
     let leftover = false;
@@ -289,6 +314,9 @@ export const commitCancellationEvidence = internalMutation({
       const subs = await ctx.db.query("billingSubscriptions").withIndex("by_customerRef_and_status", q => q.eq("customerRef", customerRef)).take(LOCAL_PROOF_LIMIT + 1);
       const purchases = await ctx.db.query("billingPurchases").withIndex("by_customerRef_and_state", q => q.eq("customerRef", customerRef)).take(LOCAL_PROOF_LIMIT + 1);
       evidence.support ||= subs.length > LOCAL_PROOF_LIMIT || purchases.length > LOCAL_PROOF_LIMIT;
+      for (const purchase of purchases) {
+        if (purchase.state === "settled" && !await hasPurchaseGrant(ctx, customer, purchase)) evidence.support = true;
+      }
       leftover = subs.some(row => row.cancellationRecoveryRequired || row.controlPendingAt !== undefined || !["cancelled", "expired"].includes(row.status)) ||
         purchases.some(row => row.cancellationRecoveryRequired || !["settled", "terminal"].includes(row.state));
     }
